@@ -1,3 +1,10 @@
 AGENTS.md
 plan.md
 upstream/
+.venv/
+node_modules/
+test-results/
+playwright-report/
+blob-report/
+*.pyc
+__pycache__/

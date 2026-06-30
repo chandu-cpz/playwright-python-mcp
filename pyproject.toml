@@ -1,0 +1,27 @@
+[project]
+name = "playwright-python-mcp"
+version = "0.1.0"
+description = "Python port of the official Playwright MCP"
+authors = [
+    { name = "Chandrakanth V", email = "chandrakanthvarakala@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.28.1",
+    "playwright>=1.61.0",
+]
+
+[project.scripts]
+playwright-python-mcp = "playwright_python_mcp:main"
+
+[build-system]
+requires = ["uv_build>=0.10.12,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.1.0",
+    "pytest>=9.1.1",
+    "ruff>=0.15.20",
+    "ty>=0.0.55",
+]
