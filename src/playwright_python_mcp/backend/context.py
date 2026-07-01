@@ -35,6 +35,7 @@ class Context:
         self.config = config
         self._browser_context = browser_context
         self.cwd = cwd or Path.cwd()
+        self.client_roots: list[Path] | None = None
         self._tabs: list[Tab] = []
         self._current_tab: Tab | None = None
 
@@ -139,8 +140,10 @@ class Context:
             return
         output = self.output_dir().resolve()
         workspace = self.cwd.resolve()
-        if not _is_relative_to(resolved, output) and not _is_relative_to(resolved, workspace):
-            raise ValueError(f"File access denied: {resolved} is outside allowed roots. Allowed roots: {output}, {workspace}")
+        allowed_roots = [output, *(self.client_roots or [workspace])]
+        if not any(_is_relative_to(resolved, root.resolve()) for root in allowed_roots):
+            roots_text = ", ".join(str(root) for root in allowed_roots)
+            raise ValueError(f"File access denied: {resolved} is outside allowed roots. Allowed roots: {roots_text}")
 
     @staticmethod
     def _is_system_directory(path: Path) -> bool:

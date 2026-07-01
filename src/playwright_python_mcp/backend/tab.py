@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from playwright.async_api import ConsoleMessage, Error, Locator, Page, Request
+from playwright.async_api import ConsoleMessage, Dialog, Download, Error, FileChooser, Locator, Page, Request
 
 from .locator_generator import as_python_locator
 from .log_file import LogFile
@@ -87,11 +88,15 @@ class Tab:
         self._requests: list[RequestEntry] = []
         self._recent_event_entries: list[dict[str, Any]] = []
         self._modal_states: list[dict[str, Any]] = []
+        self._modal_event = asyncio.Event()
         self._navigation_index = 0
         self._console_log = LogFile(context, file_prefix="console", title="Console")
         page.on("console", self._on_console_message)
         page.on("pageerror", self._on_page_error)
         page.on("request", self._on_request)
+        page.on("dialog", self._on_dialog)
+        page.on("filechooser", self._on_file_chooser)
+        page.on("download", self._on_download)
 
     async def dispose(self) -> None:
         self._console_log.stop()
@@ -123,10 +128,13 @@ class Tab:
         button: Button | None = None,
         modifiers: list[Modifier] | None = None,
     ) -> None:
-        if double_click:
-            await resolved.locator.dblclick(button=button, modifiers=modifiers)
-        else:
-            await resolved.locator.click(button=button, modifiers=modifiers)
+        async def action() -> None:
+            if double_click:
+                await resolved.locator.dblclick(button=button, modifiers=modifiers)
+            else:
+                await resolved.locator.click(button=button, modifiers=modifiers)
+
+        await self.wait_for_completion(action)
 
     async def select_option(self, resolved: ResolvedTarget, *, values: list[str]) -> None:
         await resolved.locator.select_option(values)
@@ -135,7 +143,7 @@ class Tab:
         await resolved.locator.hover()
 
     async def drag_to(self, start: ResolvedTarget, end: ResolvedTarget) -> None:
-        await start.locator.drag_to(end.locator)
+        await self.wait_for_completion(lambda: start.locator.drag_to(end.locator))
 
     async def mouse_move_xy(self, *, x: int | float, y: int | float) -> None:
         await self.page.mouse.move(x, y)
@@ -149,7 +157,9 @@ class Tab:
         click_count: int | None = None,
         delay: int | float | None = None,
     ) -> None:
-        await self.page.mouse.click(x, y, button=button, click_count=click_count, delay=delay)
+        await self.wait_for_completion(
+            lambda: self.page.mouse.click(x, y, button=button, click_count=click_count, delay=delay)
+        )
 
     async def mouse_drag_xy(
         self,
@@ -159,10 +169,31 @@ class Tab:
         end_x: int | float,
         end_y: int | float,
     ) -> None:
-        await self.page.mouse.move(start_x, start_y)
-        await self.page.mouse.down()
-        await self.page.mouse.move(end_x, end_y)
-        await self.page.mouse.up()
+        async def action() -> None:
+            await self.page.mouse.move(start_x, start_y)
+            await self.page.mouse.down()
+            await self.page.mouse.move(end_x, end_y)
+            await self.page.mouse.up()
+
+        await self.wait_for_completion(action)
+
+    async def wait_for_completion(self, action) -> None:
+        if self._modal_states:
+            return
+        self._modal_event = asyncio.Event()
+
+        async def action_and_settle() -> None:
+            await action()
+            await asyncio.sleep(0.5)
+
+        action_task = asyncio.create_task(action_and_settle())
+        modal_task = asyncio.create_task(self._modal_event.wait())
+        done, pending = await asyncio.wait({action_task, modal_task}, return_when=asyncio.FIRST_COMPLETED)
+        if action_task in done:
+            modal_task.cancel()
+            await action_task
+        else:
+            action_task.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
 
     async def press_key(self, key: str) -> None:
         await self.page.keyboard.press(key)
@@ -232,6 +263,13 @@ class Tab:
         boxes: bool | None = None,
         relative_to: Path | None = None,
     ) -> TabSnapshot:
+        if self._modal_states:
+            return TabSnapshot(
+                aria_snapshot="",
+                modal_states=list(self._modal_states),
+                events=self._recent_event_entries,
+                console_link=await self._console_log.take(relative_to=relative_to),
+            )
         locator = await self.snapshot_locator(target)
         aria_snapshot = await locator.aria_snapshot(mode="ai", depth=depth, boxes=boxes)
         snapshot = TabSnapshot(
@@ -317,6 +355,12 @@ class Tab:
     def requests(self) -> list[Request]:
         return [entry.request for entry in self._requests]
 
+    def modal_states(self) -> list[dict[str, Any]]:
+        return self._modal_states
+
+    def clear_modal_state(self, modal_state: dict[str, Any]) -> None:
+        self._modal_states = [state for state in self._modal_states if state is not modal_state]
+
     def clear_requests(self) -> None:
         self._requests.clear()
 
@@ -371,6 +415,55 @@ class Tab:
     def _on_request(self, request: Request) -> None:
         self._requests.append(RequestEntry(request=request))
         self._add_log_entry({"type": "request", "request": request})
+
+    def _on_dialog(self, dialog: Dialog) -> None:
+        self._modal_states.append(
+            {
+                "type": "dialog",
+                "description": f'"{dialog.type}" dialog with message "{dialog.message}"',
+                "dialog": dialog,
+                "cleared_by": "browser_handle_dialog",
+            }
+        )
+        self._modal_event.set()
+
+    def _on_file_chooser(self, file_chooser: FileChooser) -> None:
+        self._modal_states.append(
+            {
+                "type": "fileChooser",
+                "description": "File chooser",
+                "file_chooser": file_chooser,
+                "cleared_by": "browser_file_upload",
+            }
+        )
+        self._modal_event.set()
+
+    def _on_download(self, download: Download) -> None:
+        import asyncio
+
+        asyncio.create_task(self._download_started(download))
+
+    async def _download_started(self, download: Download) -> None:
+        from .context import FilenameTemplate
+
+        suggested_filename = download.suggested_filename
+        output_file = await self.context.output_file(
+            FilenameTemplate(
+                prefix="download",
+                ext="bin",
+                suggested_filename=suggested_filename,
+            ),
+            origin="code",
+        )
+        self._add_log_entry({"type": "download-start", "suggested_filename": suggested_filename})
+        await download.save_as(output_file)
+        self._add_log_entry(
+            {
+                "type": "download-finish",
+                "suggested_filename": suggested_filename,
+                "output_file": output_file,
+            }
+        )
 
     def _add_log_entry(self, entry: dict[str, Any]) -> None:
         self._recent_event_entries.append(entry)

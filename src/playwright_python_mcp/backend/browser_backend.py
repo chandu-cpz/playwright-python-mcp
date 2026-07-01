@@ -30,14 +30,21 @@ class BrowserBackend:
     def has_page(self) -> bool:
         return self._context is not None and self._context.has_tab()
 
-    async def call_tool(self, name: str, args: dict[str, Any]) -> str | ToolResult:
+    async def call_tool(self, name: str, args: dict[str, Any], *, roots: list[str] | None = None) -> str | ToolResult:
         tool = self._tools.get(name)
         if tool is None:
             return ToolResult(content=f'### Error\nTool "{name}" not found', is_error=True)
 
         try:
             context = await self._ensure_context()
+            if roots is not None:
+                from pathlib import Path
+
+                context.client_roots = [Path(root) for root in roots]
             response = Response(context, tool_name=name, tool_args=args)
+            if _blocks_on_modal_state(context, tool):
+                response.add_error(f'Error: Tool "{name}" does not handle the modal state.')
+                return await response.serialize()
             await tool.handler(context, args, response)
             result = await response.serialize()
         except ValueError as exc:
@@ -103,3 +110,13 @@ class BrowserBackend:
             channel=self._config.browser,
             headless=headless,
         )
+
+
+def _blocks_on_modal_state(context: Context, tool: Tool) -> bool:
+    tab = context.current_tab()
+    if tab is None:
+        return False
+    modal_states = tab.modal_states()
+    if not modal_states:
+        return False
+    return not any(state.get("type") == tool.clears_modal_state for state in modal_states)

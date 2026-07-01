@@ -12,7 +12,9 @@ from playwright_python_mcp.tools.registry import (
 from ..tool import Tool
 from .common import common_tools
 from .console import console_tools
+from .dialogs import dialog_tools
 from .evaluate import evaluate_tools
+from .files import file_tools
 from .form import form_tools
 from .keyboard import keyboard_tools
 from .mouse import mouse_tools
@@ -24,7 +26,9 @@ from .snapshot import snapshot_tools
 IMPLEMENTED_TOOLS = [
     *common_tools,
     *console_tools,
+    *dialog_tools,
     *evaluate_tools,
+    *file_tools,
     *form_tools,
     *keyboard_tools,
     *mouse_tools,

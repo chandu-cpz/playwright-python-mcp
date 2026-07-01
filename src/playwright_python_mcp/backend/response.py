@@ -190,6 +190,15 @@ class Response:
         events: list[str] = []
         if tab_snapshot.console_link:
             events.append(f"- New console entries: {tab_snapshot.console_link}")
+        for event in tab_snapshot.events:
+            if event.get("type") == "download-start":
+                events.append(f"- Downloading file {event.get('suggested_filename')} ...")
+            elif event.get("type") == "download-finish":
+                output_file = event.get("output_file")
+                if isinstance(output_file, Path):
+                    events.append(
+                        f'- Downloaded file {event.get("suggested_filename")} to "{self._compute_relative_to(output_file)}"'
+                    )
         return events
 
     def _compute_relative_to(self, file_name: Path) -> str:

@@ -27,6 +27,7 @@ class Tool:
     handler: ToolHandler
     parameters: tuple[ToolParameter, ...] = ()
     skill_only: bool = False
+    clears_modal_state: str | None = None
 
     def signature(self) -> Signature:
         return Signature(

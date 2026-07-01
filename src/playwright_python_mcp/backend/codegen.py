@@ -11,6 +11,8 @@ def python_literal(value: Any) -> str:
         return str(value)
     if isinstance(value, list):
         return "[" + ", ".join(python_literal(item) for item in value) + "]"
+    if isinstance(value, dict):
+        return "{" + ", ".join(f"{python_literal(key)}: {python_literal(item)}" for key, item in value.items()) + "}"
     return json.dumps(str(value))
 
 
