@@ -49,6 +49,10 @@ class Response:
     def set_close(self) -> None:
         self._is_close = True
 
+    @property
+    def is_close(self) -> bool:
+        return self._is_close
+
     async def serialize(self) -> str | ToolResult:
         sections: list[str] = []
 

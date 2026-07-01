@@ -1,0 +1,62 @@
+from __future__ import annotations
+
+from typing import Any
+
+from playwright_python_mcp.backend.codegen import python_literal
+from playwright_python_mcp.backend.context import Context
+from playwright_python_mcp.backend.response import Response
+from playwright_python_mcp.backend.tool import Tool, param
+
+
+async def _handle_navigate(context: Context, params: dict[str, Any], response: Response) -> None:
+    resolved_url = await context.check_url_and_navigate(params["url"])
+    response.set_include_snapshot()
+    response.add_code(f"await page.goto({python_literal(resolved_url)})")
+
+
+async def _handle_go_back(context: Context, _params: dict[str, Any], response: Response) -> None:
+    tab = await context.ensure_tab()
+    await tab.go_back()
+    response.set_include_snapshot()
+    response.add_code("await page.go_back()")
+
+
+async def _handle_go_forward(context: Context, _params: dict[str, Any], response: Response) -> None:
+    tab = await context.ensure_tab()
+    await tab.go_forward()
+    response.set_include_snapshot()
+    response.add_code("await page.go_forward()")
+
+
+async def _handle_reload(context: Context, _params: dict[str, Any], response: Response) -> None:
+    tab = await context.ensure_tab()
+    await tab.reload()
+    response.set_include_snapshot()
+    response.add_code("await page.reload()")
+
+
+navigate_tools = [
+    Tool(
+        name="browser_navigate",
+        capability="core-navigation",
+        parameters=(param("url", str),),
+        handler=_handle_navigate,
+    ),
+    Tool(
+        name="browser_navigate_back",
+        capability="core-navigation",
+        handler=_handle_go_back,
+    ),
+    Tool(
+        name="browser_navigate_forward",
+        capability="core-navigation",
+        handler=_handle_go_forward,
+        skill_only=True,
+    ),
+    Tool(
+        name="browser_reload",
+        capability="core-navigation",
+        handler=_handle_reload,
+        skill_only=True,
+    ),
+]
