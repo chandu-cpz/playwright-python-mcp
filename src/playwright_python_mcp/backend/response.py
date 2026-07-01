@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from fastmcp.tools.base import ToolResult
 
-from .session import BrowserSession
+if TYPE_CHECKING:
+    from .browser_backend import BrowserBackend
 
 
 @dataclass(slots=True)
@@ -15,8 +17,8 @@ class SnapshotRequest:
 
 
 class Response:
-    def __init__(self, session: BrowserSession) -> None:
-        self._session = session
+    def __init__(self, backend: BrowserBackend) -> None:
+        self._backend = backend
         self._results: list[str] = []
         self._errors: list[str] = []
         self._code: list[str] = []
@@ -57,10 +59,10 @@ class Response:
         if self._code:
             sections.append("### Ran Playwright code\n```python\n" + "\n".join(self._code) + "\n```")
 
-        if self._snapshot_request is not None and self._session.has_page():
-            page_lines = await self._session.render_page_markdown()
+        if self._snapshot_request is not None and self._backend.has_page():
+            page_lines = await self._backend.render_page_markdown()
             sections.append("### Page\n" + "\n".join(page_lines))
-            snapshot = await self._session.capture_snapshot(
+            snapshot = await self._backend.capture_snapshot(
                 target=self._snapshot_request.target,
                 depth=self._snapshot_request.depth,
                 boxes=self._snapshot_request.boxes,

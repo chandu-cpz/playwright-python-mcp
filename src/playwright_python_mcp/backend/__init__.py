@@ -1,4 +1,5 @@
+from .browser_backend import BrowserBackend
 from .response import Response, render_tabs_markdown
-from .session import BrowserSession, ResolvedTarget
+from .tab import ResolvedTarget, Tab
 
-__all__ = ["BrowserSession", "ResolvedTarget", "Response", "render_tabs_markdown"]
+__all__ = ["BrowserBackend", "ResolvedTarget", "Response", "Tab", "render_tabs_markdown"]
