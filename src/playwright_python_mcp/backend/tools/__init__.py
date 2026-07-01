@@ -23,11 +23,13 @@ from .mouse import mouse_tools
 from .navigate import navigate_tools
 from .network import network_tools
 from .pdf import pdf_tools
+from .run_code import run_code_tools
 from .screenshot import screenshot_tools
 from .snapshot import snapshot_tools
 from .storage import storage_tools
 from .tabs import tabs_tools
 from .webstorage import webstorage_tools
+from .wait import wait_tools
 
 
 IMPLEMENTED_TOOLS = [
@@ -43,11 +45,13 @@ IMPLEMENTED_TOOLS = [
     *navigate_tools,
     *network_tools,
     *pdf_tools,
+    *run_code_tools,
     *screenshot_tools,
     *snapshot_tools,
     *storage_tools,
     *tabs_tools,
     *webstorage_tools,
+    *wait_tools,
 ]
 
 
