@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any, cast
 
 from playwright_python_mcp.backend.codegen import python_literal
@@ -15,16 +16,16 @@ async def _handle_file_upload(context: Context, params: dict[str, Any], response
         raise ValueError('The tool "browser_file_upload" can only be used when there is related modal state present.')
 
     paths = params.get("paths")
+    file_names = None
     if paths:
-        for path in paths:
-            await response.resolve_client_filename(path)
+        file_names = await asyncio.gather(*(response.resolve_client_filename(path) for path in paths))
 
     response.set_include_snapshot()
     response.add_code(f"await file_chooser.set_files({python_literal(paths or [])})")
     tab.clear_modal_state(modal_state)
     file_chooser = modal_state["file_chooser"]
     if paths is not None:
-        await tab.wait_for_completion(lambda: file_chooser.set_files(paths))
+        await tab.wait_for_completion(lambda: file_chooser.set_files(file_names or []))
 
 
 async def _handle_drop(context: Context, params: dict[str, Any], response: Response) -> None:
@@ -34,17 +35,19 @@ async def _handle_drop(context: Context, params: dict[str, Any], response: Respo
     tab = await context.ensure_tab()
     resolved = await tab.resolve_target(target=params["target"], element=params.get("element"))
     payload: dict[str, Any] = {}
+    code_payload: dict[str, Any] = {}
     paths = params.get("paths")
     if paths:
-        for path in paths:
-            await response.resolve_client_filename(path)
-        payload["files"] = paths[0] if len(paths) == 1 else paths
+        file_names = await asyncio.gather(*(response.resolve_client_filename(path) for path in paths))
+        payload["files"] = file_names[0] if len(file_names) == 1 else file_names
+        code_payload["files"] = paths[0] if len(paths) == 1 else paths
     if params.get("data"):
         payload["data"] = params["data"]
+        code_payload["data"] = params["data"]
 
     response.set_include_snapshot()
-    await tab.wait_for_completion(lambda: resolved.locator.drop(cast(Any, payload)))
-    response.add_code(f"await page.{resolved.code}.drop({python_literal(payload)})")
+    await tab.wait_for_completion(lambda: resolved.locator.drop(cast(Any, payload), timeout=tab.action_timeout))
+    response.add_code(f"await page.{resolved.code}.drop({python_literal(code_payload)})")
 
 
 file_tools = [

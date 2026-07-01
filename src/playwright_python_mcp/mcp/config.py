@@ -20,6 +20,9 @@ class ServerConfig:
     output_mode: str = "file"
     secrets: dict[str, str] | None = None
     snapshot_mode: str = "full"
+    action_timeout: int | None = None
+    navigation_timeout: int | None = None
+    expect_timeout: int | None = None
 
 
 def load_config(
@@ -41,6 +44,8 @@ def load_config(
     if vision:
         merged_caps.add("vision")
 
+    timeouts = loaded.get("timeouts", {})
+
     return ServerConfig(
         browser=browser,
         caps=merged_caps,
@@ -55,4 +60,7 @@ def load_config(
         output_mode=str(loaded.get("outputMode", "file")),
         secrets=loaded.get("secrets"),
         snapshot_mode=str(loaded.get("snapshot", {}).get("mode", "full")),
+        action_timeout=timeouts.get("action"),
+        navigation_timeout=timeouts.get("navigation"),
+        expect_timeout=timeouts.get("expect"),
     )

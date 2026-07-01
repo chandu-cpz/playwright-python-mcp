@@ -15,13 +15,27 @@ async def _handle_evaluate(context: Context, params: dict[str, Any], response: R
     resolved = None
     if params.get("target") is not None:
         resolved = await tab.resolve_target(target=params["target"], element=params.get("element") or "element")
-    result, is_function = await tab.evaluate(expression, resolved)
-    code_expression = expression if is_function else f"() => ({expression})"
-    if resolved is not None:
-        response.add_code(f"await page.{resolved.code}.evaluate({python_literal(code_expression)})")
-    else:
-        response.add_code(f"await page.evaluate({python_literal(code_expression)})")
-    response.add_text_result("undefined" if result is None else json.dumps(result, indent=2))
+
+    async def action() -> None:
+        result, is_function, is_undefined = await tab.evaluate(expression, resolved)
+        code_expression = expression if is_function else f"() => ({expression})"
+        if resolved is not None:
+            response.add_code(f"await page.{resolved.code}.evaluate({python_literal(code_expression)})")
+        else:
+            response.add_code(f"await page.evaluate({python_literal(code_expression)})")
+        text = "undefined" if is_undefined else json.dumps(result, indent=2)
+        await response.add_result(
+            "Evaluation result",
+            text,
+            prefix="result",
+            ext="json",
+            suggested_filename=params.get("filename"),
+        )
+
+    try:
+        await tab.wait_for_completion(action)
+    except Exception as exc:
+        response.add_error(str(exc))
 
 
 evaluate_tools = [

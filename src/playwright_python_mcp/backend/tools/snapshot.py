@@ -14,6 +14,7 @@ async def _handle_snapshot(context: Context, params: dict[str, Any], response: R
         target=params.get("target"),
         depth=params.get("depth"),
         boxes=params.get("boxes"),
+        file_name=params.get("filename"),
     )
 
 
@@ -66,12 +67,27 @@ async def _handle_generate_locator(context: Context, params: dict[str, Any], res
     response.add_text_result(resolved.code)
 
 
+async def _handle_check(context: Context, params: dict[str, Any], response: Response) -> None:
+    tab = await context.ensure_tab()
+    resolved = await tab.resolve_target(target=params["target"], element=params.get("element"))
+    response.add_code(f"await page.{resolved.code}.check()")
+    await tab.check(resolved)
+
+
+async def _handle_uncheck(context: Context, params: dict[str, Any], response: Response) -> None:
+    tab = await context.ensure_tab()
+    resolved = await tab.resolve_target(target=params["target"], element=params.get("element"))
+    response.add_code(f"await page.{resolved.code}.uncheck()")
+    await tab.uncheck(resolved)
+
+
 snapshot_tools = [
     Tool(
         name="browser_snapshot",
         capability="core",
         parameters=(
             param("target", str | None, None),
+            param("filename", str | None, None),
             param("depth", int | None, None),
             param("boxes", bool | None, None),
         ),
@@ -121,5 +137,19 @@ snapshot_tools = [
         capability="testing",
         parameters=(param("target", str), param("element", str | None, None)),
         handler=_handle_generate_locator,
+    ),
+    Tool(
+        name="browser_check",
+        capability="core-input",
+        parameters=(param("target", str), param("element", str | None, None)),
+        handler=_handle_check,
+        skill_only=True,
+    ),
+    Tool(
+        name="browser_uncheck",
+        capability="core-input",
+        parameters=(param("target", str), param("element", str | None, None)),
+        handler=_handle_uncheck,
+        skill_only=True,
     ),
 ]

@@ -32,6 +32,9 @@ VISION_TOOL_NAMES = [
     "browser_mouse_move_xy",
     "browser_mouse_click_xy",
     "browser_mouse_drag_xy",
+    "browser_mouse_down",
+    "browser_mouse_up",
+    "browser_mouse_wheel",
 ]
 
 TESTING_TOOL_NAMES = [

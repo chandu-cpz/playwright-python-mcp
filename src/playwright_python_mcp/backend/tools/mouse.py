@@ -52,6 +52,37 @@ async def _handle_mouse_click_xy(context: Context, params: dict[str, Any], respo
     await tab.mouse_click_xy(x=x, y=y, button=button, click_count=click_count, delay=delay)
 
 
+async def _handle_mouse_down(context: Context, params: dict[str, Any], response: Response) -> None:
+    tab = await context.ensure_tab()
+    button = params.get("button")
+    response.add_code("# Press mouse down")
+    if button is None:
+        response.add_code("await page.mouse.down()")
+    else:
+        response.add_code(f"await page.mouse.down(button={python_literal(button)})")
+    await tab.mouse_down(button=button)
+
+
+async def _handle_mouse_up(context: Context, params: dict[str, Any], response: Response) -> None:
+    tab = await context.ensure_tab()
+    button = params.get("button")
+    response.add_code("# Press mouse up")
+    if button is None:
+        response.add_code("await page.mouse.up()")
+    else:
+        response.add_code(f"await page.mouse.up(button={python_literal(button)})")
+    await tab.mouse_up(button=button)
+
+
+async def _handle_mouse_wheel(context: Context, params: dict[str, Any], response: Response) -> None:
+    tab = await context.ensure_tab()
+    delta_x = params.get("deltaX", 0)
+    delta_y = params.get("deltaY", 0)
+    response.add_code("# Scroll mouse wheel")
+    response.add_code(f"await page.mouse.wheel({python_literal(delta_x)}, {python_literal(delta_y)})")
+    await tab.mouse_wheel(delta_x=delta_x, delta_y=delta_y)
+
+
 async def _handle_mouse_drag_xy(context: Context, params: dict[str, Any], response: Response) -> None:
     tab = await context.ensure_tab()
     start_x = params["startX"]
@@ -85,6 +116,24 @@ mouse_tools = [
             param("delay", Number | None, None),
         ),
         handler=_handle_mouse_click_xy,
+    ),
+    Tool(
+        name="browser_mouse_down",
+        capability="vision",
+        parameters=(param("button", Button | None, None),),
+        handler=_handle_mouse_down,
+    ),
+    Tool(
+        name="browser_mouse_up",
+        capability="vision",
+        parameters=(param("button", Button | None, None),),
+        handler=_handle_mouse_up,
+    ),
+    Tool(
+        name="browser_mouse_wheel",
+        capability="vision",
+        parameters=(param("deltaX", Number, 0), param("deltaY", Number, 0)),
+        handler=_handle_mouse_wheel,
     ),
     Tool(
         name="browser_mouse_drag_xy",

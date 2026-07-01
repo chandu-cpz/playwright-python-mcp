@@ -98,6 +98,14 @@ class Tab:
         page.on("filechooser", self._on_file_chooser)
         page.on("download", self._on_download)
 
+    @property
+    def action_timeout(self) -> int | None:
+        return self.context.config.action_timeout
+
+    @property
+    def navigation_timeout(self) -> int | None:
+        return self.context.config.navigation_timeout
+
     async def dispose(self) -> None:
         self._console_log.stop()
 
@@ -106,16 +114,16 @@ class Tab:
 
     async def navigate(self, url: str) -> None:
         self._clear_collected_artifacts()
-        await self.page.goto(url, wait_until="domcontentloaded")
+        await self.page.goto(url, wait_until="domcontentloaded", timeout=self.navigation_timeout)
 
     async def go_back(self) -> None:
-        await self.page.go_back(wait_until="commit")
+        await self.page.go_back(wait_until="commit", timeout=self.navigation_timeout)
 
     async def go_forward(self) -> None:
-        await self.page.go_forward(wait_until="commit")
+        await self.page.go_forward(wait_until="commit", timeout=self.navigation_timeout)
 
     async def reload(self) -> None:
-        await self.page.reload()
+        await self.page.reload(timeout=self.navigation_timeout)
 
     async def resize(self, *, width: int, height: int) -> None:
         await self.page.set_viewport_size({"width": width, "height": height})
@@ -130,20 +138,20 @@ class Tab:
     ) -> None:
         async def action() -> None:
             if double_click:
-                await resolved.locator.dblclick(button=button, modifiers=modifiers)
+                await resolved.locator.dblclick(button=button, modifiers=modifiers, timeout=self.action_timeout)
             else:
-                await resolved.locator.click(button=button, modifiers=modifiers)
+                await resolved.locator.click(button=button, modifiers=modifiers, timeout=self.action_timeout)
 
         await self.wait_for_completion(action)
 
     async def select_option(self, resolved: ResolvedTarget, *, values: list[str]) -> None:
-        await resolved.locator.select_option(values)
+        await resolved.locator.select_option(values, timeout=self.action_timeout)
 
     async def hover(self, resolved: ResolvedTarget) -> None:
-        await resolved.locator.hover()
+        await resolved.locator.hover(timeout=self.action_timeout)
 
     async def drag_to(self, start: ResolvedTarget, end: ResolvedTarget) -> None:
-        await self.wait_for_completion(lambda: start.locator.drag_to(end.locator))
+        await self.wait_for_completion(lambda: start.locator.drag_to(end.locator, timeout=self.action_timeout))
 
     async def mouse_move_xy(self, *, x: int | float, y: int | float) -> None:
         await self.page.mouse.move(x, y)
@@ -160,6 +168,15 @@ class Tab:
         await self.wait_for_completion(
             lambda: self.page.mouse.click(x, y, button=button, click_count=click_count, delay=delay)
         )
+
+    async def mouse_down(self, *, button: Button | None = None) -> None:
+        await self.page.mouse.down(button=button)
+
+    async def mouse_up(self, *, button: Button | None = None) -> None:
+        await self.page.mouse.up(button=button)
+
+    async def mouse_wheel(self, *, delta_x: int | float, delta_y: int | float) -> None:
+        await self.page.mouse.wheel(delta_x, delta_y)
 
     async def mouse_drag_xy(
         self,
@@ -196,7 +213,21 @@ class Tab:
             action_task.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
 
     async def press_key(self, key: str) -> None:
-        await self.page.keyboard.press(key)
+        if key == "Enter":
+            await self.wait_for_completion(lambda: self.page.keyboard.press(key))
+        else:
+            await self.page.keyboard.press(key)
+
+    async def press_sequentially(self, *, text: str, submit: bool = False) -> None:
+        await self.page.keyboard.type(text)
+        if submit:
+            await self.wait_for_completion(lambda: self.page.keyboard.press("Enter"))
+
+    async def key_down(self, key: str) -> None:
+        await self.page.keyboard.down(key)
+
+    async def key_up(self, key: str) -> None:
+        await self.page.keyboard.up(key)
 
     async def type_text(
         self,
@@ -206,31 +237,43 @@ class Tab:
         submit: bool = False,
         slowly: bool = False,
     ) -> None:
-        if slowly:
-            await resolved.locator.press_sequentially(text)
+        async def action() -> None:
+            if slowly:
+                await resolved.locator.press_sequentially(text, timeout=self.action_timeout)
+            else:
+                await resolved.locator.fill(text, timeout=self.action_timeout)
+            if submit:
+                await resolved.locator.press("Enter", timeout=self.action_timeout)
+
+        if submit or slowly:
+            await self.wait_for_completion(action)
         else:
-            await resolved.locator.fill(text)
-        if submit:
-            await resolved.locator.press("Enter")
+            await action()
 
     async def fill_form_field(self, resolved: ResolvedTarget, *, field_type: str, value: str) -> None:
         if field_type in {"textbox", "slider"}:
-            await resolved.locator.fill(value)
+            await resolved.locator.fill(value, timeout=self.action_timeout)
         elif field_type in {"checkbox", "radio"}:
-            await resolved.locator.set_checked(value == "true")
+            await resolved.locator.set_checked(value == "true", timeout=self.action_timeout)
         elif field_type == "combobox":
-            await resolved.locator.select_option(label=value)
+            await resolved.locator.select_option(label=value, timeout=self.action_timeout)
         else:
             raise ValueError(f"Unsupported form field type: {field_type}")
 
-    async def evaluate(self, expression: str, resolved: ResolvedTarget | None = None) -> tuple[Any, bool]:
+    async def check(self, resolved: ResolvedTarget) -> None:
+        await resolved.locator.check(timeout=self.action_timeout)
+
+    async def uncheck(self, resolved: ResolvedTarget) -> None:
+        await resolved.locator.uncheck(timeout=self.action_timeout)
+
+    async def evaluate(self, expression: str, resolved: ResolvedTarget | None = None) -> tuple[Any, bool, bool]:
         if resolved is not None:
             result = await resolved.locator.evaluate(
                 """async (element, expr) => {
                     const value = eval(`(${expr})`);
                     const isFunction = typeof value === 'function';
                     const result = await (isFunction ? value(element) : value);
-                    return { result, isFunction };
+                    return { result: result === undefined ? null : result, isFunction, isUndefined: result === undefined };
                 }""",
                 expression,
             )
@@ -240,11 +283,11 @@ class Tab:
                     const value = eval(`(${expr})`);
                     const isFunction = typeof value === 'function';
                     const result = await (isFunction ? value() : value);
-                    return { result, isFunction };
+                    return { result: result === undefined ? null : result, isFunction, isUndefined: result === undefined };
                 }""",
                 expression,
             )
-        return result["result"], result["isFunction"]
+        return result["result"], result["isFunction"], result["isUndefined"]
 
     async def capture_snapshot(
         self,

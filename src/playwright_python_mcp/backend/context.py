@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from playwright.async_api import BrowserContext
 
 from playwright_python_mcp.mcp.config import ServerConfig
+from .codegen import python_literal
 
 if TYPE_CHECKING:
     from .tab import Tab
@@ -22,6 +23,12 @@ class FilenameTemplate:
     ext: str
     suggested_filename: str | None = None
     date: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LookupSecret:
+    value: str
+    code: str
 
 
 class Context:
@@ -134,6 +141,12 @@ class Context:
             if secret_value:
                 text = text.replace(secret_value, f"<secret>{secret_name}</secret>")
         return text
+
+    def lookup_secret(self, secret_name: str) -> LookupSecret:
+        secret_value = (self.config.secrets or {}).get(secret_name)
+        if secret_value is None:
+            return LookupSecret(value=secret_name, code=python_literal(secret_name))
+        return LookupSecret(value=secret_value, code=f"os.environ[{python_literal(secret_name)}]")
 
     def _check_file(self, resolved: Path, *, origin: str) -> None:
         if origin == "code" or self.config.allow_unrestricted_file_access:
