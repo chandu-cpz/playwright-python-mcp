@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastmcp.tools.base import ToolResult
+from mcp.types import ImageContent, TextContent
 
 if TYPE_CHECKING:
     from .context import Context
@@ -167,9 +168,19 @@ class Response:
         is_error = any(section[3] for section in sections)
         if is_error:
             return ToolResult(content=text, is_error=True, meta=_result_meta(self._is_close))
+        if self._image_results and self._context.config.image_responses != "omit":
+            return ToolResult(content=[TextContent(type="text", text=text), *self._image_content()])
         if self._is_close:
             return ToolResult(content=text, meta=_result_meta(True))
         return text
+
+    def _image_content(self) -> list[ImageContent]:
+        import base64
+
+        return [
+            ImageContent(type="image", data=base64.b64encode(data).decode("ascii"), mimeType=f"image/{image_type}")
+            for data, image_type in self._image_results
+        ]
 
     def _serialize_sections(self, sections: list[tuple[str, list[str], str | None, bool]]) -> str:
         rendered: list[str] = []

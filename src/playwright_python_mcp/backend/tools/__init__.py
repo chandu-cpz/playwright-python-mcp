@@ -20,6 +20,8 @@ from .keyboard import keyboard_tools
 from .mouse import mouse_tools
 from .navigate import navigate_tools
 from .network import network_tools
+from .pdf import pdf_tools
+from .screenshot import screenshot_tools
 from .snapshot import snapshot_tools
 
 
@@ -34,6 +36,8 @@ IMPLEMENTED_TOOLS = [
     *mouse_tools,
     *navigate_tools,
     *network_tools,
+    *pdf_tools,
+    *screenshot_tools,
     *snapshot_tools,
 ]
 

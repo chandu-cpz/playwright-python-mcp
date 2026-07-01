@@ -121,7 +121,7 @@ class Context:
 
     async def output_file(self, template: FilenameTemplate, *, origin: str) -> Path:
         date = template.date or datetime.now(UTC)
-        safe_date = date.isoformat().replace("+00:00", "Z").replace(":", "-").replace(".", "-")
+        safe_date = date.isoformat(timespec="milliseconds").replace("+00:00", "Z").replace(":", "-").replace(".", "-")
         base_name = template.suggested_filename or f"{template.prefix}-{safe_date}{'.' + template.ext if template.ext else ''}"
         resolved = (self.output_dir() / base_name).resolve()
         self._check_file(resolved, origin=origin)

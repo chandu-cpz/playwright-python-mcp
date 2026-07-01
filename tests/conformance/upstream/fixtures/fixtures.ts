@@ -220,6 +220,7 @@ export function parseResponse(response: any, cwd: string = test.info().outputPat
     events: sections.get('Events'),
     modalState: sections.get('Modal state'),
     inlineSnapshot: snapshot,
+    attachments: response.content?.slice(1),
     isError: response.isError,
   };
 }
