@@ -3,10 +3,12 @@ from __future__ import annotations
 from playwright_python_mcp.mcp.config import ServerConfig
 from playwright_python_mcp.tools.registry import (
     CORE_TOOL_NAMES,
+    DEVTOOLS_TOOL_NAMES,
     NETWORK_TOOL_NAMES,
     PDF_TOOL_NAMES,
     STORAGE_TOOL_NAMES,
     TESTING_TOOL_NAMES,
+    TRACING_TOOL_NAMES,
     VISION_TOOL_NAMES,
 )
 
@@ -24,10 +26,13 @@ from .navigate import navigate_tools
 from .network import network_tools
 from .pdf import pdf_tools
 from .run_code import run_code_tools
+from .route import route_tools
 from .screenshot import screenshot_tools
 from .snapshot import snapshot_tools
 from .storage import storage_tools
 from .tabs import tabs_tools
+from .tracing import tracing_tools
+from .video import video_tools
 from .webstorage import webstorage_tools
 from .wait import wait_tools
 
@@ -46,10 +51,13 @@ IMPLEMENTED_TOOLS = [
     *network_tools,
     *pdf_tools,
     *run_code_tools,
+    *route_tools,
     *screenshot_tools,
     *snapshot_tools,
     *storage_tools,
     *tabs_tools,
+    *tracing_tools,
+    *video_tools,
     *webstorage_tools,
     *wait_tools,
 ]
@@ -63,6 +71,10 @@ def filtered_tools(config: ServerConfig) -> list[Tool]:
         visible_names.update(VISION_TOOL_NAMES)
     if config.caps and "network" in config.caps:
         visible_names.update(NETWORK_TOOL_NAMES)
+    if config.caps and "tracing" in config.caps:
+        visible_names.update(TRACING_TOOL_NAMES)
+    if config.caps and "devtools" in config.caps:
+        visible_names.update(DEVTOOLS_TOOL_NAMES)
     if config.caps and "storage" in config.caps:
         visible_names.update(STORAGE_TOOL_NAMES)
     if config.caps and "testing" in config.caps:

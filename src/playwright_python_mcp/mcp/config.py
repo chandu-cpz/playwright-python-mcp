@@ -34,6 +34,7 @@ def load_config(
     test_id_attribute: str,
     vision: bool,
     console_level: str | None = None,
+    output_dir: Path | None = None,
 ) -> ServerConfig:
     loaded = {}
     if config_path is not None:
@@ -55,7 +56,7 @@ def load_config(
         codegen=str(loaded.get("codegen", "python")),
         console_level=console_level or str(loaded.get("console", {}).get("level", "info")),
         image_responses=str(loaded.get("imageResponses", "allow")),
-        output_dir=Path(loaded["outputDir"]) if loaded.get("outputDir") else None,
+        output_dir=output_dir or (Path(loaded["outputDir"]) if loaded.get("outputDir") else None),
         output_max_size=loaded.get("outputMaxSize"),
         output_mode=str(loaded.get("outputMode", "file")),
         secrets=loaded.get("secrets"),

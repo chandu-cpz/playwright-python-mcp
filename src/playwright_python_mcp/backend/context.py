@@ -5,7 +5,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 from urllib.parse import urlparse
 
 from playwright.async_api import BrowserContext
@@ -31,6 +31,17 @@ class LookupSecret:
     code: str
 
 
+@dataclass(slots=True)
+class RouteEntry:
+    pattern: str
+    status: int | None = None
+    body: str | None = None
+    content_type: str | None = None
+    add_headers: dict[str, str] | None = None
+    remove_headers: list[str] | None = None
+    handler: Callable[[Any], Any] | None = None
+
+
 class Context:
     """Browser-context runtime.
 
@@ -45,6 +56,9 @@ class Context:
         self.client_roots: list[Path] | None = None
         self._tabs: list[Tab] = []
         self._current_tab: Tab | None = None
+        self._routes: list[RouteEntry] = []
+        self.trace_file: Path | None = None
+        self.video_file: Path | None = None
 
     def has_tab(self) -> bool:
         return self._current_tab is not None
@@ -108,6 +122,27 @@ class Context:
 
     async def set_offline(self, offline: bool) -> None:
         await self._browser_context.set_offline(offline)
+
+    def routes(self) -> list[RouteEntry]:
+        return list(self._routes)
+
+    async def add_route(self, entry: RouteEntry) -> None:
+        if entry.handler is None:
+            raise ValueError("Route handler is required")
+        await self._browser_context.route(entry.pattern, entry.handler)
+        self._routes.append(entry)
+
+    async def remove_route(self, pattern: str | None = None) -> int:
+        if pattern is None:
+            removed = len(self._routes)
+            await self._browser_context.unroute_all()
+            self._routes.clear()
+            return removed
+        removed_entries = [entry for entry in self._routes if entry.pattern == pattern]
+        for entry in removed_entries:
+            await self._browser_context.unroute(pattern, entry.handler)
+        self._routes = [entry for entry in self._routes if entry.pattern != pattern]
+        return len(removed_entries)
 
     async def check_url_and_navigate(self, url: str) -> str:
         resolved_url = self._resolve_url(url)

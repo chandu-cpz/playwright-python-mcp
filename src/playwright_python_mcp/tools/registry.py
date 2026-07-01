@@ -43,6 +43,22 @@ TESTING_TOOL_NAMES = [
 
 NETWORK_TOOL_NAMES = [
     "browser_network_state_set",
+    "browser_route",
+    "browser_route_list",
+    "browser_unroute",
+]
+
+TRACING_TOOL_NAMES = [
+    "browser_start_tracing",
+    "browser_stop_tracing",
+]
+
+DEVTOOLS_TOOL_NAMES = [
+    "browser_start_video",
+    "browser_stop_video",
+    "browser_video_chapter",
+    "browser_video_show_actions",
+    "browser_video_hide_actions",
 ]
 
 STORAGE_TOOL_NAMES = [
