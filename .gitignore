@@ -1,6 +1,7 @@
 AGENTS.md
 plan.md
 rules.md
+.mimocode/
 /upstream/
 .venv/
 node_modules/
