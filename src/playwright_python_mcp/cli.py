@@ -36,6 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Attribute name to use for test ids.",
     )
     parser.add_argument(
+        "--console-level",
+        choices=("error", "warning", "info", "debug"),
+        help='Level of console messages to include in snapshot event logs. Defaults to "info".',
+    )
+    parser.add_argument(
         "--vision",
         action="store_true",
         help="Legacy option, use --caps=vision instead.",
@@ -65,6 +70,7 @@ def main(argv: list[str] | None = None) -> None:
         headless=args.headless,
         test_id_attribute=args.test_id_attribute,
         vision=args.vision,
+        console_level=args.console_level,
     )
     server = create_server(config)
     server.run()

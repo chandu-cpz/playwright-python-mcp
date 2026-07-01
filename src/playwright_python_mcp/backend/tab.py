@@ -317,6 +317,11 @@ class Tab:
     def requests(self) -> list[Request]:
         return [entry.request for entry in self._requests]
 
+    def clear_console_messages(self) -> None:
+        self._console_messages.clear()
+        self._console_log.stop()
+        self._console_log = LogFile(self.context, file_prefix="console", title="Console")
+
     def _console_entries(self, *, all_messages: bool) -> list[ConsoleEntry]:
         if all_messages:
             return list(self._console_messages)
@@ -347,9 +352,12 @@ class Tab:
         self._append_console_log(entry)
 
     def _on_page_error(self, error: Error) -> None:
+        text = str(error)
+        if not text.startswith("Error:"):
+            text = f"Error: {text}"
         entry = ConsoleEntry(
             type="error",
-            text=str(error),
+            text=text,
             location_url=self.page.url,
             navigation_index=self._navigation_index,
         )
@@ -368,6 +376,8 @@ class Tab:
         import asyncio
         import time
 
+        if not _should_include_console_message(self.context.config.console_level, entry.type):
+            return
         asyncio.create_task(self._console_log.append_line(time.time() * 1000, entry.render()))
 
 

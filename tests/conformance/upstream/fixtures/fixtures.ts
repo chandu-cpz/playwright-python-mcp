@@ -103,7 +103,7 @@ export const test = baseTest.extend<TestFixtures & TestOptions, WorkerFixtures>(
         });
       }
 
-      const { transport, stderr } = await createTransport(args, options?.cwd || testInfo.outputPath('cwd'));
+      const { transport, stderr } = await createTransport(args, options?.cwd || testInfo.outputPath());
       let stderrBuffer = '';
       stderr?.on('data', data => {
         stderrBuffer += data.toString();
@@ -160,7 +160,7 @@ type Response = Awaited<ReturnType<Client['callTool']>>;
 
 export const expect = baseExpect.extend({
   toHaveResponse(response: Response, object: any) {
-    const parsed = parseResponse(response, test.info().outputPath('cwd'));
+    const parsed = parseResponse(response, test.info().outputPath());
     const text = parsed.text;
     const isNot = this.isNot;
 
@@ -191,7 +191,7 @@ export const expect = baseExpect.extend({
   },
 });
 
-function parseResponse(response: any, cwd: string) {
+export function parseResponse(response: any, cwd: string = test.info().outputPath()) {
   const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
   const sections = parseSections(text);
 
@@ -217,9 +217,24 @@ function parseResponse(response: any, cwd: string) {
     code: unwrapCodeBlock(sections.get('Ran Playwright code')),
     page: sections.get('Page'),
     snapshot,
+    events: sections.get('Events'),
+    modalState: sections.get('Modal state'),
     inlineSnapshot: snapshot,
     isError: response.isError,
   };
+}
+
+export async function consoleEntries(response: ReturnType<typeof parseResponse>) {
+  const events = response.events;
+  const match = events?.match(/New console entries: ([^\n]+)/);
+  if (!match)
+    return '';
+  const file = match[1].replace(/#L\d+(-L\d+)?$/, '');
+  try {
+    return await fs.promises.readFile(path.resolve(test.info().outputPath(), file), 'utf-8');
+  } catch {
+    return '';
+  }
 }
 
 function unwrapCodeBlock(value: string | undefined) {
