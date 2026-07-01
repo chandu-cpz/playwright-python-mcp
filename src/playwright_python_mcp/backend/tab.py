@@ -100,6 +100,16 @@ class Tab:
         if submit:
             await resolved.locator.press("Enter")
 
+    async def fill_form_field(self, resolved: ResolvedTarget, *, field_type: str, value: str) -> None:
+        if field_type in {"textbox", "slider"}:
+            await resolved.locator.fill(value)
+        elif field_type in {"checkbox", "radio"}:
+            await resolved.locator.set_checked(value == "true")
+        elif field_type == "combobox":
+            await resolved.locator.select_option(label=value)
+        else:
+            raise ValueError(f"Unsupported form field type: {field_type}")
+
     async def evaluate(self, expression: str, resolved: ResolvedTarget | None = None) -> tuple[Any, bool]:
         if resolved is not None:
             result = await resolved.locator.evaluate(

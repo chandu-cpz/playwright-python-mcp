@@ -37,6 +37,11 @@ def _locator_for_part(part: ParsedSelectorPart) -> str:
         if exact:
             return f"get_by_text({python_literal(text)}, exact=True)"
         return f"get_by_text({python_literal(text)})"
+    if part.name == "internal:label":
+        exact, text = _detect_exact(part.body)
+        if exact:
+            return f"get_by_label({python_literal(text)}, exact=True)"
+        return f"get_by_label({python_literal(text)})"
     if part.name == "nth":
         if part.body == "0":
             return "first"

@@ -233,6 +233,23 @@ class BrowserBackend:
 
         return await self.run_tool(handler)
 
+    async def browser_fill_form(self, *, fields: list[dict[str, str]]) -> str | ToolResult:
+        async def handler(response: Response) -> None:
+            tab = await self._ensure_tab()
+            for field in fields:
+                resolved = await tab.resolve_target(target=field["target"], element=field.get("name"))
+                field_type = field["type"]
+                value = field["value"]
+                await tab.fill_form_field(resolved, field_type=field_type, value=value)
+                if field_type in {"textbox", "slider"}:
+                    response.add_code(python_call(resolved.code, "fill", value))
+                elif field_type in {"checkbox", "radio"}:
+                    response.add_code(python_call(resolved.code, "set_checked", value == "true"))
+                elif field_type == "combobox":
+                    response.add_code(f"await page.{resolved.code}.select_option(label={python_literal(value)})")
+
+        return await self.run_tool(handler)
+
     async def browser_console_messages(self) -> str | ToolResult:
         async def handler(response: Response) -> None:
             tab = await self._ensure_tab()

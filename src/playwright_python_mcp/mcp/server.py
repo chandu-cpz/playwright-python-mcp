@@ -132,6 +132,10 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
             slowly=slowly,
         )
 
+    @app.tool(name="browser_fill_form")
+    async def browser_fill_form(fields: list[dict[str, str]]) -> str | ToolResult:
+        return await backend.browser_fill_form(fields=fields)
+
     @app.tool(name="browser_console_messages")
     async def browser_console_messages() -> str | ToolResult:
         return await backend.browser_console_messages()
@@ -153,6 +157,7 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
         "browser_evaluate",
         "browser_hover",
         "browser_console_messages",
+        "browser_fill_form",
         "browser_press_key",
         "browser_select_option",
         "browser_type",
