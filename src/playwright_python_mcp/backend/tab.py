@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from playwright.async_api import Locator, Page
+from playwright.async_api import ConsoleMessage, Locator, Page
 
 from .locator_generator import as_python_locator
 
@@ -20,6 +20,15 @@ class ResolvedTarget:
     code: str
 
 
+@dataclass(slots=True)
+class ConsoleEntry:
+    type: str
+    text: str
+
+    def render(self) -> str:
+        return f"[{self.type.upper()}] {self.text}"
+
+
 class Tab:
     """Page-level runtime.
 
@@ -30,6 +39,8 @@ class Tab:
     def __init__(self, page: Page) -> None:
         self.page = page
         self.crashed = False
+        self._console_messages: list[ConsoleEntry] = []
+        page.on("console", self._on_console_message)
 
     async def close(self) -> None:
         await self.page.close()
@@ -70,6 +81,24 @@ class Tab:
 
     async def drag_to(self, start: ResolvedTarget, end: ResolvedTarget) -> None:
         await start.locator.drag_to(end.locator)
+
+    async def press_key(self, key: str) -> None:
+        await self.page.keyboard.press(key)
+
+    async def type_text(
+        self,
+        resolved: ResolvedTarget,
+        *,
+        text: str,
+        submit: bool = False,
+        slowly: bool = False,
+    ) -> None:
+        if slowly:
+            await resolved.locator.press_sequentially(text)
+        else:
+            await resolved.locator.fill(text)
+        if submit:
+            await resolved.locator.press("Enter")
 
     async def evaluate(self, expression: str, resolved: ResolvedTarget | None = None) -> tuple[Any, bool]:
         if resolved is not None:
@@ -140,3 +169,9 @@ class Tab:
         if target is None:
             return self.page.locator("body")
         return (await self.resolve_target(target=target)).locator
+
+    def console_messages(self) -> list[str]:
+        return [message.render() for message in self._console_messages]
+
+    def _on_console_message(self, message: ConsoleMessage) -> None:
+        self._console_messages.append(ConsoleEntry(type=message.type, text=message.text))

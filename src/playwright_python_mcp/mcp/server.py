@@ -112,6 +112,30 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
             filename=filename,
         )
 
+    @app.tool(name="browser_press_key")
+    async def browser_press_key(key: str) -> str | ToolResult:
+        return await backend.browser_press_key(key=key)
+
+    @app.tool(name="browser_type")
+    async def browser_type(
+        target: str,
+        text: str,
+        element: str | None = None,
+        submit: bool = False,
+        slowly: bool = False,
+    ) -> str | ToolResult:
+        return await backend.browser_type(
+            target=target,
+            text=text,
+            element=element,
+            submit=submit,
+            slowly=slowly,
+        )
+
+    @app.tool(name="browser_console_messages")
+    async def browser_console_messages() -> str | ToolResult:
+        return await backend.browser_console_messages()
+
     @app.tool(name="browser_resize")
     async def browser_resize(width: int, height: int) -> str | ToolResult:
         return await backend.browser_resize(width=width, height=height)
@@ -128,7 +152,10 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
         "browser_drag",
         "browser_evaluate",
         "browser_hover",
+        "browser_console_messages",
+        "browser_press_key",
         "browser_select_option",
+        "browser_type",
         "browser_resize",
         "browser_close",
     }

@@ -198,6 +198,51 @@ class BrowserBackend:
 
         return await self.run_tool(handler)
 
+    async def browser_press_key(self, *, key: str) -> str | ToolResult:
+        async def handler(response: Response) -> None:
+            tab = await self._ensure_tab()
+            response.add_code(f"# Press {key}")
+            response.add_code(f"await page.keyboard.press({python_literal(key)})")
+            if key == "Enter":
+                response.set_include_snapshot()
+            await tab.press_key(key)
+
+        return await self.run_tool(handler)
+
+    async def browser_type(
+        self,
+        *,
+        target: str,
+        text: str,
+        element: str | None = None,
+        submit: bool = False,
+        slowly: bool = False,
+    ) -> str | ToolResult:
+        async def handler(response: Response) -> None:
+            tab = await self._ensure_tab()
+            resolved = await tab.resolve_target(target=target, element=element)
+            if slowly:
+                response.set_include_snapshot()
+                response.add_code(python_call(resolved.code, "press_sequentially", text))
+            else:
+                response.add_code(python_call(resolved.code, "fill", text))
+            if submit:
+                response.set_include_snapshot()
+                response.add_code(python_call(resolved.code, "press", "Enter"))
+            await tab.type_text(resolved, text=text, submit=submit, slowly=slowly)
+
+        return await self.run_tool(handler)
+
+    async def browser_console_messages(self) -> str | ToolResult:
+        async def handler(response: Response) -> None:
+            tab = await self._ensure_tab()
+            messages = tab.console_messages()
+            response.add_text_result(
+                "\n".join([f"Total messages: {len(messages)} (Errors: 0, Warnings: 0)", "", *messages])
+            )
+
+        return await self.run_tool(handler)
+
     async def browser_generate_locator(
         self,
         *,
