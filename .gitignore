@@ -1,6 +1,7 @@
 AGENTS.md
 plan.md
-upstream/
+rules.md
+/upstream/
 .venv/
 node_modules/
 test-results/
