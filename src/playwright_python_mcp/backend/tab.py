@@ -65,6 +65,12 @@ class Tab:
     async def select_option(self, resolved: ResolvedTarget, *, values: list[str]) -> None:
         await resolved.locator.select_option(values)
 
+    async def hover(self, resolved: ResolvedTarget) -> None:
+        await resolved.locator.hover()
+
+    async def drag_to(self, start: ResolvedTarget, end: ResolvedTarget) -> None:
+        await start.locator.drag_to(end.locator)
+
     async def capture_snapshot(
         self,
         *,

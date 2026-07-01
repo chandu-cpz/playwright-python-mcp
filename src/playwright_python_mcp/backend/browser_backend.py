@@ -141,6 +141,52 @@ class BrowserBackend:
 
         return await self.run_tool(handler)
 
+    async def browser_hover(
+        self,
+        *,
+        target: str,
+        element: str | None = None,
+    ) -> str | ToolResult:
+        async def handler(response: Response) -> None:
+            tab = await self._ensure_tab()
+            resolved = await tab.resolve_target(target=target, element=element)
+            response.set_include_snapshot()
+            response.add_code(python_invocation(resolved.code, "hover"))
+            await tab.hover(resolved)
+
+        return await self.run_tool(handler)
+
+    async def browser_drag(
+        self,
+        *,
+        start_target: str,
+        end_target: str,
+        start_element: str | None = None,
+        end_element: str | None = None,
+    ) -> str | ToolResult:
+        async def handler(response: Response) -> None:
+            tab = await self._ensure_tab()
+            start = await tab.resolve_target(target=start_target, element=start_element)
+            end = await tab.resolve_target(target=end_target, element=end_element)
+            response.set_include_snapshot()
+            response.add_code(f"await page.{start.code}.drag_to(page.{end.code})")
+            await tab.drag_to(start, end)
+
+        return await self.run_tool(handler)
+
+    async def browser_generate_locator(
+        self,
+        *,
+        target: str,
+        element: str | None = None,
+    ) -> str | ToolResult:
+        async def handler(response: Response) -> None:
+            tab = await self._ensure_tab()
+            resolved = await tab.resolve_target(target=target, element=element)
+            response.add_text_result(resolved.code)
+
+        return await self.run_tool(handler)
+
     async def browser_resize(self, *, width: int, height: int) -> str | ToolResult:
         async def handler(response: Response) -> None:
             tab = await self._ensure_tab()

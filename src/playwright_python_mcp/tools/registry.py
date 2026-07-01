@@ -33,3 +33,7 @@ VISION_TOOL_NAMES = [
     "browser_mouse_click_xy",
     "browser_mouse_drag_xy",
 ]
+
+TESTING_TOOL_NAMES = [
+    "browser_generate_locator",
+]

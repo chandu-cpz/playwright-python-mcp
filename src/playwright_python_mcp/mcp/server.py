@@ -8,7 +8,12 @@ from fastmcp.tools.base import ToolResult
 
 from playwright_python_mcp.backend import BrowserBackend
 from playwright_python_mcp.mcp.config import ServerConfig
-from playwright_python_mcp.tools.registry import CORE_TOOL_NAMES, PDF_TOOL_NAMES, VISION_TOOL_NAMES
+from playwright_python_mcp.tools.registry import (
+    CORE_TOOL_NAMES,
+    PDF_TOOL_NAMES,
+    TESTING_TOOL_NAMES,
+    VISION_TOOL_NAMES,
+)
 
 
 Button = Literal["left", "middle", "right"]
@@ -75,6 +80,24 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
     ) -> str | ToolResult:
         return await backend.browser_select_option(target=target, values=values, element=element)
 
+    @app.tool(name="browser_hover")
+    async def browser_hover(target: str, element: str | None = None) -> str | ToolResult:
+        return await backend.browser_hover(target=target, element=element)
+
+    @app.tool(name="browser_drag")
+    async def browser_drag(
+        startTarget: str,
+        endTarget: str,
+        startElement: str | None = None,
+        endElement: str | None = None,
+    ) -> str | ToolResult:
+        return await backend.browser_drag(
+            start_target=startTarget,
+            end_target=endTarget,
+            start_element=startElement,
+            end_element=endElement,
+        )
+
     @app.tool(name="browser_resize")
     async def browser_resize(width: int, height: int) -> str | ToolResult:
         return await backend.browser_resize(width=width, height=height)
@@ -88,6 +111,8 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
         "browser_navigate",
         "browser_navigate_back",
         "browser_click",
+        "browser_drag",
+        "browser_hover",
         "browser_select_option",
         "browser_resize",
         "browser_close",
@@ -104,5 +129,16 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
     if config.caps and "vision" in config.caps:
         for tool_name in VISION_TOOL_NAMES:
             add_placeholder(tool_name)
+
+    if config.caps and "testing" in config.caps:
+        @app.tool(name="browser_generate_locator")
+        async def browser_generate_locator(target: str, element: str | None = None) -> str | ToolResult:
+            return await backend.browser_generate_locator(target=target, element=element)
+
+        implemented.add("browser_generate_locator")
+
+        for tool_name in TESTING_TOOL_NAMES:
+            if tool_name not in implemented:
+                add_placeholder(tool_name)
 
     return PlaywrightMCPServer(app=app)
