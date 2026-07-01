@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from playwright_python_mcp.mcp.config import ServerConfig
-from playwright_python_mcp.tools.registry import CORE_TOOL_NAMES, PDF_TOOL_NAMES, TESTING_TOOL_NAMES, VISION_TOOL_NAMES
+from playwright_python_mcp.tools.registry import (
+    CORE_TOOL_NAMES,
+    NETWORK_TOOL_NAMES,
+    PDF_TOOL_NAMES,
+    TESTING_TOOL_NAMES,
+    VISION_TOOL_NAMES,
+)
 
 from ..tool import Tool
 from .common import common_tools
@@ -11,6 +17,7 @@ from .form import form_tools
 from .keyboard import keyboard_tools
 from .mouse import mouse_tools
 from .navigate import navigate_tools
+from .network import network_tools
 from .snapshot import snapshot_tools
 
 
@@ -22,6 +29,7 @@ IMPLEMENTED_TOOLS = [
     *keyboard_tools,
     *mouse_tools,
     *navigate_tools,
+    *network_tools,
     *snapshot_tools,
 ]
 
@@ -32,6 +40,8 @@ def filtered_tools(config: ServerConfig) -> list[Tool]:
         visible_names.update(PDF_TOOL_NAMES)
     if config.caps and "vision" in config.caps:
         visible_names.update(VISION_TOOL_NAMES)
+    if config.caps and "network" in config.caps:
+        visible_names.update(NETWORK_TOOL_NAMES)
     if config.caps and "testing" in config.caps:
         visible_names.update(TESTING_TOOL_NAMES)
 

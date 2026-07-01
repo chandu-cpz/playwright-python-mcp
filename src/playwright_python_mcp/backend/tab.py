@@ -317,6 +317,9 @@ class Tab:
     def requests(self) -> list[Request]:
         return [entry.request for entry in self._requests]
 
+    def clear_requests(self) -> None:
+        self._requests.clear()
+
     def clear_console_messages(self) -> None:
         self._console_messages.clear()
         self._console_log.stop()

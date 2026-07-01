@@ -37,3 +37,7 @@ VISION_TOOL_NAMES = [
 TESTING_TOOL_NAMES = [
     "browser_generate_locator",
 ]
+
+NETWORK_TOOL_NAMES = [
+    "browser_network_state_set",
+]

@@ -82,6 +82,9 @@ class Context:
             return
         await tab.close()
 
+    async def set_offline(self, offline: bool) -> None:
+        await self._browser_context.set_offline(offline)
+
     async def check_url_and_navigate(self, url: str) -> str:
         resolved_url = self._resolve_url(url)
         self._check_url_allowed(resolved_url)
