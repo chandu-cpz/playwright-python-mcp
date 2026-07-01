@@ -82,6 +82,33 @@ class Tab:
     async def drag_to(self, start: ResolvedTarget, end: ResolvedTarget) -> None:
         await start.locator.drag_to(end.locator)
 
+    async def mouse_move_xy(self, *, x: int | float, y: int | float) -> None:
+        await self.page.mouse.move(x, y)
+
+    async def mouse_click_xy(
+        self,
+        *,
+        x: int | float,
+        y: int | float,
+        button: Button | None = None,
+        click_count: int | None = None,
+        delay: int | float | None = None,
+    ) -> None:
+        await self.page.mouse.click(x, y, button=button, click_count=click_count, delay=delay)
+
+    async def mouse_drag_xy(
+        self,
+        *,
+        start_x: int | float,
+        start_y: int | float,
+        end_x: int | float,
+        end_y: int | float,
+    ) -> None:
+        await self.page.mouse.move(start_x, start_y)
+        await self.page.mouse.down()
+        await self.page.mouse.move(end_x, end_y)
+        await self.page.mouse.up()
+
     async def press_key(self, key: str) -> None:
         await self.page.keyboard.press(key)
 

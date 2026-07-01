@@ -9,6 +9,7 @@ from .console import console_tools
 from .evaluate import evaluate_tools
 from .form import form_tools
 from .keyboard import keyboard_tools
+from .mouse import mouse_tools
 from .navigate import navigate_tools
 from .snapshot import snapshot_tools
 
@@ -19,6 +20,7 @@ IMPLEMENTED_TOOLS = [
     *evaluate_tools,
     *form_tools,
     *keyboard_tools,
+    *mouse_tools,
     *navigate_tools,
     *snapshot_tools,
 ]

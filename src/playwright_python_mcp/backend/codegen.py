@@ -7,7 +7,7 @@ from typing import Any
 def python_literal(value: Any) -> str:
     if isinstance(value, bool):
         return "True" if value else "False"
-    if isinstance(value, int):
+    if isinstance(value, int | float):
         return str(value)
     if isinstance(value, list):
         return "[" + ", ".join(python_literal(item) for item in value) + "]"
