@@ -12,6 +12,14 @@ class ServerConfig:
     headless: bool = False
     allow_unrestricted_file_access: bool = False
     test_id_attribute: str = "data-testid"
+    codegen: str = "python"
+    console_level: str = "info"
+    image_responses: str = "allow"
+    output_dir: Path | None = None
+    output_max_size: int | None = None
+    output_mode: str = "file"
+    secrets: dict[str, str] | None = None
+    snapshot_mode: str = "full"
 
 
 def load_config(
@@ -38,4 +46,12 @@ def load_config(
         headless=headless,
         allow_unrestricted_file_access=bool(loaded.get("allowUnrestrictedFileAccess", False)),
         test_id_attribute=str(loaded.get("testIdAttribute", test_id_attribute)),
+        codegen=str(loaded.get("codegen", "python")),
+        console_level=str(loaded.get("console", {}).get("level", "info")),
+        image_responses=str(loaded.get("imageResponses", "allow")),
+        output_dir=Path(loaded["outputDir"]) if loaded.get("outputDir") else None,
+        output_max_size=loaded.get("outputMaxSize"),
+        output_mode=str(loaded.get("outputMode", "file")),
+        secrets=loaded.get("secrets"),
+        snapshot_mode=str(loaded.get("snapshot", {}).get("mode", "full")),
     )

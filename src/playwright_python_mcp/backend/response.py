@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastmcp.tools.base import ToolResult
 
 if TYPE_CHECKING:
-    from .browser_backend import BrowserBackend
+    from .context import Context
+    from .tab import TabHeader
 
 
 @dataclass(slots=True)
@@ -14,19 +16,77 @@ class SnapshotRequest:
     target: str | None = None
     depth: int | None = None
     boxes: bool | None = None
+    file_name: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedFile:
+    file_name: Path
+    relative_name: str
+    printable_link: str
 
 
 class Response:
-    def __init__(self, backend: BrowserBackend) -> None:
-        self._backend = backend
+    def __init__(self, context: Context, *, tool_name: str, tool_args: dict[str, object]) -> None:
+        self._context = context
+        self.tool_name = tool_name
+        self.tool_args = tool_args
+        self._client_workspace = context.cwd
         self._results: list[str] = []
         self._errors: list[str] = []
         self._code: list[str] = []
         self._snapshot_request: SnapshotRequest | None = None
+        self._image_results: list[tuple[bytes, str]] = []
+        self._written_files: set[Path] = set()
         self._is_close = False
 
     def add_text_result(self, text: str) -> None:
         self._results.append(text)
+
+    async def add_result(
+        self,
+        title: str,
+        data: bytes | str,
+        *,
+        prefix: str,
+        ext: str,
+        suggested_filename: str | None = None,
+    ) -> None:
+        if suggested_filename or isinstance(data, bytes):
+            from .context import FilenameTemplate
+
+            resolved = await self.resolve_client_file(
+                FilenameTemplate(prefix=prefix, ext=ext, suggested_filename=suggested_filename),
+                title,
+            )
+            await self.add_file_result(resolved, data)
+        else:
+            self.add_text_result(data)
+
+    async def resolve_client_file(self, template, title: str) -> ResolvedFile:
+        if template.suggested_filename:
+            file_name = await self.resolve_client_filename(template.suggested_filename)
+        else:
+            file_name = await self._context.output_file(template, origin="llm")
+        relative_name = self._compute_relative_to(file_name)
+        return ResolvedFile(
+            file_name=file_name,
+            relative_name=relative_name,
+            printable_link=f"- [{title}]({relative_name})",
+        )
+
+    async def resolve_client_filename(self, filename: str) -> Path:
+        return await self._context.workspace_file(filename, self._client_workspace)
+
+    async def add_file_result(self, resolved_file: ResolvedFile, data: bytes | str | None) -> None:
+        await self._write_file(resolved_file, data)
+        self.add_text_result(resolved_file.printable_link)
+
+    def add_file_link(self, title: str, file_name: Path) -> None:
+        self.add_text_result(f"- [{title}]({self._compute_relative_to(file_name)})")
+
+    async def register_image_result(self, data: bytes, image_type: str) -> None:
+        self._image_results.append((data, image_type))
 
     def add_error(self, error: str) -> None:
         self._errors.append(error)
@@ -43,8 +103,9 @@ class Response:
         target: str | None = None,
         depth: int | None = None,
         boxes: bool | None = None,
+        file_name: str | None = None,
     ) -> None:
-        self._snapshot_request = SnapshotRequest(target=target, depth=depth, boxes=boxes)
+        self._snapshot_request = SnapshotRequest(target=target, depth=depth, boxes=boxes, file_name=file_name)
 
     def set_close(self) -> None:
         self._is_close = True
@@ -54,37 +115,157 @@ class Response:
         return self._is_close
 
     async def serialize(self) -> str | ToolResult:
-        sections: list[str] = []
+        sections: list[tuple[str, list[str], str | None, bool]] = []
 
         if self._errors:
-            sections.append("### Error\n" + "\n".join(self._errors))
+            sections.append(("Error", self._errors, None, True))
         if self._results:
-            sections.append("### Result\n" + "\n".join(self._results))
-        if self._code:
-            sections.append("### Ran Playwright code\n```python\n" + "\n".join(self._code) + "\n```")
+            sections.append(("Result", self._results, None, False))
+        if self._context.config.codegen != "none" and self._code:
+            sections.append(("Ran Playwright code", self._code, "python", False))
 
-        if self._snapshot_request is not None and self._backend.has_page():
-            page_lines = await self._backend.render_page_markdown()
-            sections.append("### Page\n" + "\n".join(page_lines))
-            snapshot = await self._backend.capture_snapshot(
-                target=self._snapshot_request.target,
-                depth=self._snapshot_request.depth,
-                boxes=self._snapshot_request.boxes,
+        tab_snapshot = None
+        tab = self._context.current_tab()
+        if tab is not None:
+            request = self._snapshot_request
+            tab_snapshot = await tab.capture_tab_snapshot(
+                target=request.target if request else None,
+                depth=request.depth if request else None,
+                boxes=request.boxes if request else None,
+                relative_to=self._client_workspace,
             )
-            sections.append("### Snapshot\n```yaml\n" + snapshot + "\n```")
+            tab_headers = [await current.header_snapshot() for current in self._context.tabs()]
+            if self._snapshot_request is not None or any(header.changed for header in tab_headers):
+                if len(tab_headers) != 1:
+                    sections.append(("Open tabs", render_tabs_markdown(tab_headers), None, False))
+                current_header = next((header for header in tab_headers if header.current), tab_headers[0])
+                sections.append(("Page", render_tab_markdown(current_header), None, False))
 
-        text = "\n\n".join(sections)
-        if self._errors:
+        if tab_snapshot is not None and tab_snapshot.modal_states:
+            sections.append(("Modal state", render_modal_states(tab_snapshot.modal_states), None, False))
+
+        if tab_snapshot is not None and self._snapshot_request is not None:
+            if self._snapshot_request.file_name is not None or self._context.config.snapshot_mode == "full":
+                from .context import FilenameTemplate
+
+                suggested_filename = self._snapshot_request.file_name
+                resolved_file = await self.resolve_client_file(
+                    FilenameTemplate(prefix="page", ext="yml", suggested_filename=suggested_filename),
+                    "Snapshot",
+                )
+                await self._write_file(resolved_file, tab_snapshot.aria_snapshot)
+                sections.append(("Snapshot", [resolved_file.printable_link], None, False))
+            else:
+                sections.append(("Snapshot", [tab_snapshot.aria_snapshot], "yaml", False))
+
+        events = self._render_events(tab_snapshot)
+        if events:
+            sections.append(("Events", events, None, False))
+
+        await self._enforce_output_budget()
+        text = self._serialize_sections(sections)
+        is_error = any(section[3] for section in sections)
+        if is_error:
             return ToolResult(content=text, is_error=True, meta=_result_meta(self._is_close))
         if self._is_close:
             return ToolResult(content=text, meta=_result_meta(True))
         return text
 
+    def _serialize_sections(self, sections: list[tuple[str, list[str], str | None, bool]]) -> str:
+        rendered: list[str] = []
+        for title, content, codeframe, _is_error in sections:
+            if not content:
+                continue
+            rendered.append(f"### {title}")
+            if codeframe:
+                rendered.append(f"```{codeframe}")
+            rendered.extend(content)
+            if codeframe:
+                rendered.append("```")
+        return "\n".join(self._context.redact_secrets("\n".join(rendered)).splitlines())
 
-def render_tabs_markdown(tabs: list[object]) -> list[str]:
+    def _render_events(self, tab_snapshot) -> list[str]:
+        if tab_snapshot is None:
+            return []
+        events: list[str] = []
+        if tab_snapshot.console_link:
+            events.append(f"- New console entries: {tab_snapshot.console_link}")
+        return events
+
+    def _compute_relative_to(self, file_name: Path) -> str:
+        import os
+
+        rel = os.path.relpath(file_name, self._client_workspace)
+        if os.path.dirname(rel) == "." and not rel.startswith("."):
+            return "./" + rel
+        return rel
+
+    async def _write_file(self, resolved_file: ResolvedFile, data: bytes | str | None = None) -> None:
+        resolved_file.file_name.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(data, str):
+            resolved_file.file_name.write_text(self._context.redact_secrets(data), encoding="utf-8")
+        elif data is not None:
+            resolved_file.file_name.write_bytes(data)
+        self._written_files.add(resolved_file.file_name.resolve())
+
+    async def _enforce_output_budget(self) -> None:
+        max_size = self._context.config.output_max_size
+        if not max_size:
+            return
+        output_dir = self._context.output_dir()
+        if not output_dir.exists():
+            return
+        entries = [
+            path
+            for path in output_dir.rglob("*")
+            if path.is_file()
+        ]
+        total = sum(path.stat().st_size for path in entries)
+        if total <= max_size:
+            return
+        entries.sort(key=lambda path: path.stat().st_mtime)
+        for path in entries:
+            if total <= max_size:
+                break
+            if path.resolve() in self._written_files:
+                continue
+            try:
+                size = path.stat().st_size
+                path.unlink()
+                total -= size
+            except OSError:
+                continue
+
+
+def render_tab_markdown(tab: TabHeader) -> list[str]:
+    lines = [f"- Page URL: {tab.url}"]
+    if tab.title:
+        lines.append(f"- Page Title: {tab.title}")
+    if tab.crashed:
+        lines.append("- Page status: crashed")
+    if tab.console["errors"] or tab.console["warnings"]:
+        lines.append(f"- Console: {tab.console['errors']} errors, {tab.console['warnings']} warnings")
+    return lines
+
+
+def render_tabs_markdown(tabs: list[TabHeader]) -> list[str]:
     if not tabs:
         return ["No open tabs. Navigate to a URL to create one."]
-    raise NotImplementedError("Multi-tab rendering is not implemented yet.")
+    lines: list[str] = []
+    for index, tab in enumerate(tabs):
+        current = " (current)" if tab.current else ""
+        crashed = " [crashed]" if tab.crashed else ""
+        lines.append(f"- {index}:{current} [{tab.title}]({tab.url}){crashed}")
+    return lines
+
+
+def render_modal_states(modal_states: list[dict[str, object]]) -> list[str]:
+    if not modal_states:
+        return ["- There is no modal state present"]
+    return [
+        f"- [{state.get('description', 'Modal state')}]: can be handled by {state.get('cleared_by', 'the matching tool')}"
+        for state in modal_states
+    ]
 
 
 def _result_meta(is_close: bool) -> dict[str, object] | None:

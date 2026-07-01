@@ -1,12 +1,27 @@
 from __future__ import annotations
 
+import os
+import tempfile
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from playwright.async_api import BrowserContext
 
 from playwright_python_mcp.mcp.config import ServerConfig
 
-from .tab import Tab
+if TYPE_CHECKING:
+    from .tab import Tab
+
+
+@dataclass(frozen=True, slots=True)
+class FilenameTemplate:
+    prefix: str
+    ext: str
+    suggested_filename: str | None = None
+    date: datetime | None = None
 
 
 class Context:
@@ -16,9 +31,10 @@ class Context:
     - packages/playwright-core/src/tools/backend/context.ts
     """
 
-    def __init__(self, browser_context: BrowserContext, config: ServerConfig) -> None:
+    def __init__(self, browser_context: BrowserContext, config: ServerConfig, *, cwd: Path | None = None) -> None:
         self.config = config
         self._browser_context = browser_context
+        self.cwd = cwd or Path.cwd()
         self._tabs: list[Tab] = []
         self._current_tab: Tab | None = None
 
@@ -28,7 +44,17 @@ class Context:
     def tabs(self) -> list[Tab]:
         return self._tabs
 
+    def current_tab(self) -> Tab | None:
+        return self._current_tab
+
+    def current_tab_or_die(self) -> Tab:
+        if self._current_tab is None:
+            raise ValueError("No open pages available.")
+        return self._current_tab
+
     async def dispose(self) -> None:
+        for tab in self._tabs:
+            await tab.dispose()
         await self._browser_context.close()
         self._tabs.clear()
         self._current_tab = None
@@ -40,8 +66,10 @@ class Context:
         return self._current_tab
 
     async def new_tab(self) -> Tab:
+        from .tab import Tab
+
         page = await self._browser_context.new_page()
-        tab = Tab(page)
+        tab = Tab(self, page)
         self._tabs.append(tab)
         self._current_tab = tab
         page.on("close", lambda _: self._on_page_closed(tab))
@@ -74,6 +102,48 @@ class Context:
         if parsed.scheme == "file" and not self.config.allow_unrestricted_file_access:
             raise ValueError(f'Error: Access to "file:" protocol is blocked. Attempted URL: "{url}"')
 
+    async def workspace_file(self, file_name: str, per_call_workspace_dir: Path | None = None) -> Path:
+        workspace = per_call_workspace_dir or self.cwd
+        resolved = (workspace / file_name).resolve()
+        self._check_file(resolved, origin="llm")
+        return resolved
+
+    async def output_file(self, template: FilenameTemplate, *, origin: str) -> Path:
+        date = template.date or datetime.now(UTC)
+        safe_date = date.isoformat().replace("+00:00", "Z").replace(":", "-").replace(".", "-")
+        base_name = template.suggested_filename or f"{template.prefix}-{safe_date}{'.' + template.ext if template.ext else ''}"
+        resolved = (self.output_dir() / base_name).resolve()
+        self._check_file(resolved, origin=origin)
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        return resolved
+
+    def output_dir(self) -> Path:
+        if self.config.output_dir is not None:
+            return self.config.output_dir.resolve()
+        base_name = ".playwright-mcp"
+        if self._is_system_directory(self.cwd) or not os.access(self.cwd, os.W_OK):
+            return Path(tempfile.gettempdir()) / base_name
+        return self.cwd / base_name
+
+    def redact_secrets(self, text: str) -> str:
+        for secret_name, secret_value in (self.config.secrets or {}).items():
+            if secret_value:
+                text = text.replace(secret_value, f"<secret>{secret_name}</secret>")
+        return text
+
+    def _check_file(self, resolved: Path, *, origin: str) -> None:
+        if origin == "code" or self.config.allow_unrestricted_file_access:
+            return
+        output = self.output_dir().resolve()
+        workspace = self.cwd.resolve()
+        if not _is_relative_to(resolved, output) and not _is_relative_to(resolved, workspace):
+            raise ValueError(f"File access denied: {resolved} is outside allowed roots. Allowed roots: {output}, {workspace}")
+
+    @staticmethod
+    def _is_system_directory(path: Path) -> bool:
+        resolved = path.resolve()
+        return resolved in {Path("/"), Path("/tmp"), Path("/var"), Path("/usr"), Path("/bin"), Path("/etc")}
+
     def _on_page_closed(self, tab: Tab) -> None:
         if tab not in self._tabs:
             return
@@ -84,3 +154,11 @@ class Context:
 
     def _on_page_crashed(self, tab: Tab) -> None:
         tab.crashed = True
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False

@@ -160,7 +160,7 @@ type Response = Awaited<ReturnType<Client['callTool']>>;
 
 export const expect = baseExpect.extend({
   toHaveResponse(response: Response, object: any) {
-    const parsed = parseResponse(response, test.info().outputPath());
+    const parsed = parseResponse(response, test.info().outputPath('cwd'));
     const text = parsed.text;
     const isNot = this.isNot;
 

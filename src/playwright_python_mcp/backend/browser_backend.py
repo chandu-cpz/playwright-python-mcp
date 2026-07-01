@@ -35,9 +35,9 @@ class BrowserBackend:
         if tool is None:
             return ToolResult(content=f'### Error\nTool "{name}" not found', is_error=True)
 
-        response = Response(self)
         try:
             context = await self._ensure_context()
+            response = Response(context, tool_name=name, tool_args=args)
             await tool.handler(context, args, response)
             result = await response.serialize()
         except ValueError as exc:
