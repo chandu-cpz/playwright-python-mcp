@@ -98,6 +98,20 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
             end_element=endElement,
         )
 
+    @app.tool(name="browser_evaluate")
+    async def browser_evaluate(
+        function: str,
+        target: str | None = None,
+        element: str | None = None,
+        filename: str | None = None,
+    ) -> str | ToolResult:
+        return await backend.browser_evaluate(
+            function=function,
+            target=target,
+            element=element,
+            filename=filename,
+        )
+
     @app.tool(name="browser_resize")
     async def browser_resize(width: int, height: int) -> str | ToolResult:
         return await backend.browser_resize(width=width, height=height)
@@ -112,6 +126,7 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
         "browser_navigate_back",
         "browser_click",
         "browser_drag",
+        "browser_evaluate",
         "browser_hover",
         "browser_select_option",
         "browser_resize",

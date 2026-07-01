@@ -213,6 +213,7 @@ function parseResponse(response: any, cwd: string) {
   return {
     text,
     error: sections.get('Error'),
+    result: sections.get('Result'),
     code: unwrapCodeBlock(sections.get('Ran Playwright code')),
     page: sections.get('Page'),
     snapshot,

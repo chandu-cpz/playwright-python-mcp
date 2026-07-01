@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from playwright.async_api import Locator, Page
 
@@ -70,6 +70,29 @@ class Tab:
 
     async def drag_to(self, start: ResolvedTarget, end: ResolvedTarget) -> None:
         await start.locator.drag_to(end.locator)
+
+    async def evaluate(self, expression: str, resolved: ResolvedTarget | None = None) -> tuple[Any, bool]:
+        if resolved is not None:
+            result = await resolved.locator.evaluate(
+                """async (element, expr) => {
+                    const value = eval(`(${expr})`);
+                    const isFunction = typeof value === 'function';
+                    const result = await (isFunction ? value(element) : value);
+                    return { result, isFunction };
+                }""",
+                expression,
+            )
+        else:
+            result = await self.page.evaluate(
+                """async expr => {
+                    const value = eval(`(${expr})`);
+                    const isFunction = typeof value === 'function';
+                    const result = await (isFunction ? value() : value);
+                    return { result, isFunction };
+                }""",
+                expression,
+            )
+        return result["result"], result["isFunction"]
 
     async def capture_snapshot(
         self,

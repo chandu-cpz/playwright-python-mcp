@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 
 from fastmcp.tools.base import ToolResult
@@ -171,6 +172,29 @@ class BrowserBackend:
             response.set_include_snapshot()
             response.add_code(f"await page.{start.code}.drag_to(page.{end.code})")
             await tab.drag_to(start, end)
+
+        return await self.run_tool(handler)
+
+    async def browser_evaluate(
+        self,
+        *,
+        function: str,
+        target: str | None = None,
+        element: str | None = None,
+        filename: str | None = None,
+    ) -> str | ToolResult:
+        async def handler(response: Response) -> None:
+            tab = await self._ensure_tab()
+            resolved = None
+            if target is not None:
+                resolved = await tab.resolve_target(target=target, element=element or "element")
+            result, is_function = await tab.evaluate(function, resolved)
+            code_expression = function if is_function else f"() => ({function})"
+            if resolved is not None:
+                response.add_code(f"await page.{resolved.code}.evaluate({python_literal(code_expression)})")
+            else:
+                response.add_code(f"await page.evaluate({python_literal(code_expression)})")
+            response.add_text_result("undefined" if result is None else json.dumps(result, indent=2))
 
         return await self.run_tool(handler)
 
