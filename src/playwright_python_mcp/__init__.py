@@ -1,2 +1,3 @@
-def main() -> None:
-    print("Hello from playwright-python-mcp!")
+from .cli import main
+
+__all__ = ["main"]
