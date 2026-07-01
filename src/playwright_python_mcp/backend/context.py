@@ -52,6 +52,9 @@ class Context:
     def tabs(self) -> list[Tab]:
         return self._tabs
 
+    def browser_context(self) -> BrowserContext:
+        return self._browser_context
+
     def current_tab(self) -> Tab | None:
         return self._current_tab
 
@@ -89,6 +92,19 @@ class Context:
         if tab is None:
             return
         await tab.close()
+
+    async def close_tab(self, index: int | None = None) -> None:
+        if index is None:
+            await self.close_current_tab()
+            return
+        if index < 0 or index >= len(self._tabs):
+            raise ValueError(f"Tab index {index} is out of range")
+        await self._tabs[index].close()
+
+    async def select_tab(self, index: int) -> None:
+        if index < 0 or index >= len(self._tabs):
+            raise ValueError(f"Tab index {index} is out of range")
+        self._current_tab = self._tabs[index]
 
     async def set_offline(self, offline: bool) -> None:
         await self._browser_context.set_offline(offline)

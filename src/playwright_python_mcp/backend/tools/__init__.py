@@ -5,6 +5,7 @@ from playwright_python_mcp.tools.registry import (
     CORE_TOOL_NAMES,
     NETWORK_TOOL_NAMES,
     PDF_TOOL_NAMES,
+    STORAGE_TOOL_NAMES,
     TESTING_TOOL_NAMES,
     VISION_TOOL_NAMES,
 )
@@ -12,6 +13,7 @@ from playwright_python_mcp.tools.registry import (
 from ..tool import Tool
 from .common import common_tools
 from .console import console_tools
+from .cookies import cookie_tools
 from .dialogs import dialog_tools
 from .evaluate import evaluate_tools
 from .files import file_tools
@@ -23,11 +25,15 @@ from .network import network_tools
 from .pdf import pdf_tools
 from .screenshot import screenshot_tools
 from .snapshot import snapshot_tools
+from .storage import storage_tools
+from .tabs import tabs_tools
+from .webstorage import webstorage_tools
 
 
 IMPLEMENTED_TOOLS = [
     *common_tools,
     *console_tools,
+    *cookie_tools,
     *dialog_tools,
     *evaluate_tools,
     *file_tools,
@@ -39,6 +45,9 @@ IMPLEMENTED_TOOLS = [
     *pdf_tools,
     *screenshot_tools,
     *snapshot_tools,
+    *storage_tools,
+    *tabs_tools,
+    *webstorage_tools,
 ]
 
 
@@ -50,6 +59,8 @@ def filtered_tools(config: ServerConfig) -> list[Tool]:
         visible_names.update(VISION_TOOL_NAMES)
     if config.caps and "network" in config.caps:
         visible_names.update(NETWORK_TOOL_NAMES)
+    if config.caps and "storage" in config.caps:
+        visible_names.update(STORAGE_TOOL_NAMES)
     if config.caps and "testing" in config.caps:
         visible_names.update(TESTING_TOOL_NAMES)
 

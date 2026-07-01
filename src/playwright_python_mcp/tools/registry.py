@@ -44,3 +44,23 @@ TESTING_TOOL_NAMES = [
 NETWORK_TOOL_NAMES = [
     "browser_network_state_set",
 ]
+
+STORAGE_TOOL_NAMES = [
+    "browser_cookie_list",
+    "browser_cookie_get",
+    "browser_cookie_set",
+    "browser_cookie_delete",
+    "browser_cookie_clear",
+    "browser_storage_state",
+    "browser_set_storage_state",
+    "browser_localstorage_list",
+    "browser_localstorage_get",
+    "browser_localstorage_set",
+    "browser_localstorage_delete",
+    "browser_localstorage_clear",
+    "browser_sessionstorage_list",
+    "browser_sessionstorage_get",
+    "browser_sessionstorage_set",
+    "browser_sessionstorage_delete",
+    "browser_sessionstorage_clear",
+]

@@ -35,6 +35,7 @@ export class TestServer {
   readonly PREFIX: string;
   readonly CROSS_PROCESS_PREFIX: string;
   readonly HELLO_WORLD: string;
+  readonly EMPTY_PAGE: string;
 
   static async create(port: number): Promise<TestServer> {
     const server = new TestServer(port);
@@ -67,6 +68,7 @@ export class TestServer {
     this.PREFIX = `${protocol}://${same_origin}:${port}/`;
     this.CROSS_PROCESS_PREFIX = `${protocol}://${cross_origin}:${port}/`;
     this.HELLO_WORLD = `${this.PREFIX}hello-world`;
+    this.EMPTY_PAGE = `${this.PREFIX}empty.html`;
   }
 
   setCSP(path: string, csp: string) {
@@ -133,6 +135,7 @@ export class TestServer {
     this.setContent('/favicon.ico', '', 'image/x-icon');
 
     this.setContent('/', ``, 'text/html');
+    this.setContent('/empty.html', ``, 'text/html');
 
     this.setContent('/hello-world', `
       <title>Title</title>

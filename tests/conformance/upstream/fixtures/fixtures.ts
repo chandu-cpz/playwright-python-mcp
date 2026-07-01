@@ -217,6 +217,7 @@ export function parseResponse(response: any, cwd: string = test.info().outputPat
     code: unwrapCodeBlock(sections.get('Ran Playwright code')),
     page: sections.get('Page'),
     snapshot,
+    tabs: sections.get('Open tabs'),
     events: sections.get('Events'),
     modalState: sections.get('Modal state'),
     inlineSnapshot: snapshot,
