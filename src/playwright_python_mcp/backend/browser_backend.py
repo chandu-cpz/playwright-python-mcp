@@ -78,6 +78,24 @@ class BrowserBackend:
 
         return await self.run_tool(handler)
 
+    async def browser_navigate_forward(self) -> str | ToolResult:
+        async def handler(response: Response) -> None:
+            tab = await self._ensure_tab()
+            await tab.go_forward()
+            response.set_include_snapshot()
+            response.add_code("await page.go_forward()")
+
+        return await self.run_tool(handler)
+
+    async def browser_reload(self) -> str | ToolResult:
+        async def handler(response: Response) -> None:
+            tab = await self._ensure_tab()
+            await tab.reload()
+            response.set_include_snapshot()
+            response.add_code("await page.reload()")
+
+        return await self.run_tool(handler)
+
     async def browser_click(
         self,
         *,

@@ -40,6 +40,12 @@ class Tab:
     async def go_back(self) -> None:
         await self.page.go_back(wait_until="commit")
 
+    async def go_forward(self) -> None:
+        await self.page.go_forward(wait_until="commit")
+
+    async def reload(self) -> None:
+        await self.page.reload()
+
     async def resize(self, *, width: int, height: int) -> None:
         await self.page.set_viewport_size({"width": width, "height": height})
 
