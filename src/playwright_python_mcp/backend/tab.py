@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from playwright.async_api import ConsoleMessage, Dialog, Download, Error, FileChooser, Locator, Page, Request
 
 from .locator_generator import as_python_locator
+from .locator_parser import locator_or_selector_as_selector
 from .log_file import LogFile
 
 if TYPE_CHECKING:
@@ -357,13 +358,14 @@ class Tab:
 
     async def resolve_target(self, *, target: str, element: str | None = None) -> ResolvedTarget:
         if not _REF_PATTERN.match(target):
-            handle = await self.page.query_selector(target)
+            selector = locator_or_selector_as_selector(target, test_id_attribute=self.context.config.test_id_attribute)
+            handle = await self.page.query_selector(selector)
             if handle is None:
                 raise ValueError(f'"{target}" does not match any elements.')
             await handle.dispose()
             return ResolvedTarget(
-                locator=self.page.locator(target),
-                code=as_python_locator(target),
+                locator=self.page.locator(selector),
+                code=as_python_locator(selector),
             )
 
         try:
