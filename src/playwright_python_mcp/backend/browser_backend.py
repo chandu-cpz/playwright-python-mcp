@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastmcp.tools.base import ToolResult
 from playwright.async_api import Browser, BrowserContext as PlaywrightBrowserContext, Playwright, async_playwright
@@ -9,10 +9,12 @@ from playwright.async_api import Browser, BrowserContext as PlaywrightBrowserCon
 from playwright_python_mcp.mcp.config import ServerConfig
 
 from .context import Context
-from .extension_relay import CDPRelayServer
 from .response import Response
 from .session_log import SessionLog
 from .tool import Tool
+
+if TYPE_CHECKING:
+    from .extension_relay import CDPRelayServer
 
 
 class BrowserBackend:
@@ -142,6 +144,15 @@ class BrowserBackend:
                     f'Extension mode (--extension) is only supported with Chromium-based browsers, '
                     f'got "{self._config.browser_name}".'
                 )
+            try:
+                from .extension_relay import CDPRelayServer
+            except ModuleNotFoundError as exc:
+                if exc.name and exc.name.startswith("websockets"):
+                    raise ValueError(
+                        '--extension requires the optional "extension" dependency group. '
+                        'Install playwright-python-mcp[extension].'
+                    ) from exc
+                raise
             self._extension_relay = CDPRelayServer(
                 self._playwright,
                 browser_channel=self._config.browser_channel or self._config.browser,

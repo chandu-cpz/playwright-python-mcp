@@ -6,6 +6,7 @@ rules.md
 .zapply/
 /upstream/
 .venv/
+/dist/
 node_modules/
 test-results/
 playwright-report/

@@ -1,0 +1,27 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v3
+
+      - run: uv run ruff check .
+      - run: uv run ty check
+      - run: uv run mypy .
+      - run: uv run pytest
+      - run: uv build
+      - run: uv publish --token ${{ secrets.PYPI_TOKEN }}

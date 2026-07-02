@@ -914,11 +914,15 @@ wheels = [
 
 [[package]]
 name = "playwright-python-mcp"
-version = "0.1.0"
+version = "0.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
     { name = "playwright" },
+]
+
+[package.optional-dependencies]
+extension = [
     { name = "websockets" },
 ]
 
@@ -928,14 +932,16 @@ dev = [
     { name = "pytest" },
     { name = "ruff" },
     { name = "ty" },
+    { name = "websockets" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "fastmcp", specifier = ">=3.4.2" },
     { name = "playwright", specifier = ">=1.61.0" },
-    { name = "websockets", specifier = ">=14.0" },
+    { name = "websockets", marker = "extra == 'extension'", specifier = ">=14.0" },
 ]
+provides-extras = ["extension"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -943,6 +949,7 @@ dev = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.15.20" },
     { name = "ty", specifier = ">=0.0.55" },
+    { name = "websockets", specifier = ">=14.0" },
 ]
 
 [[package]]

@@ -1,14 +1,36 @@
 [project]
 name = "playwright-python-mcp"
-version = "0.1.0"
+version = "0.0.1"
 description = "Python port of the official Playwright MCP"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [
     { name = "Chandrakanth V", email = "chandrakanthvarakala@gmail.com" }
 ]
 requires-python = ">=3.12"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Testing",
+]
 dependencies = [
     "fastmcp>=3.4.2",
     "playwright>=1.61.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/chandu-cpz/playwright-python-mcp"
+Repository = "https://github.com/chandu-cpz/playwright-python-mcp"
+Issues = "https://github.com/chandu-cpz/playwright-python-mcp/issues"
+
+[project.optional-dependencies]
+extension = [
     "websockets>=14.0",
 ]
 
@@ -25,6 +47,7 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.15.20",
     "ty>=0.0.55",
+    "websockets>=14.0",
 ]
 
 [tool.mypy]

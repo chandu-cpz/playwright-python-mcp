@@ -60,6 +60,12 @@ uv run playwright-python-mcp --extension
 
 `--extension` starts a local Python CDP relay and opens the Playwright browser extension connect page. The Playwright Extension must already be installed in the selected Chrome/Edge profile.
 
+Published installs keep the extension relay dependency optional. To use `--extension`, install the `extension` extra:
+
+```bash
+uvx --from 'playwright-python-mcp[extension]' playwright-python-mcp --extension
+```
+
 Supported configuration sources follow upstream merge order:
 
 1. Defaults.
