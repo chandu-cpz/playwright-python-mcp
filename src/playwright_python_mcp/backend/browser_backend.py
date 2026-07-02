@@ -4,7 +4,7 @@ import os
 from typing import Any
 
 from fastmcp.tools.base import ToolResult
-from playwright.async_api import Browser, Playwright, async_playwright
+from playwright.async_api import Browser, BrowserContext as PlaywrightBrowserContext, Playwright, async_playwright
 
 from playwright_python_mcp.mcp.config import ServerConfig
 
@@ -25,6 +25,7 @@ class BrowserBackend:
         self._tools = {tool.name: tool for tool in tools}
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
+        self._playwright_context: PlaywrightBrowserContext | None = None
         self._context: Context | None = None
 
     def has_page(self) -> bool:
@@ -63,6 +64,7 @@ class BrowserBackend:
             await self._playwright.stop()
         self._playwright = None
         self._browser = None
+        self._playwright_context = None
         self._context = None
 
     async def render_page_markdown(self) -> list[str]:
@@ -89,27 +91,48 @@ class BrowserBackend:
         if self._playwright is None:
             self._playwright = await async_playwright().start()
             self._playwright.selectors.set_test_id_attribute(self._config.test_id_attribute)
-        if self._browser is None:
+        if self._browser is None and self._playwright_context is None:
             self._browser = await self._launch_browser()
-        browser_context = await self._browser.new_context()
+        if self._playwright_context is not None:
+            browser_context = self._playwright_context
+        else:
+            assert self._browser is not None
+            browser_context = await self._browser.new_context(**self._config.browser_context_options)
+        if self._config.action_timeout is not None:
+            browser_context.set_default_timeout(self._config.action_timeout)
+        if self._config.navigation_timeout is not None:
+            browser_context.set_default_navigation_timeout(self._config.navigation_timeout)
         self._context = Context(browser_context, self._config)
         return self._context
 
     async def _launch_browser(self) -> Browser:
         assert self._playwright is not None
-        headless = self._config.headless
+        if self._config.cdp_endpoint:
+            self._browser = await self._playwright.chromium.connect_over_cdp(
+                self._config.cdp_endpoint,
+                headers=self._config.cdp_headers,
+                timeout=self._config.cdp_timeout,
+            )
+            return self._browser
+
+        launch_options = dict(self._config.browser_launch_options)
+        headless = bool(launch_options.get("headless", self._config.headless))
         if not headless and os.name == "posix" and not os.environ.get("DISPLAY"):
             headless = True
+        launch_options["headless"] = headless
 
-        if self._config.browser == "chromium":
-            return await self._playwright.chromium.launch(headless=headless)
-        if self._config.browser in {"firefox", "webkit"}:
-            browser_type = getattr(self._playwright, self._config.browser)
-            return await browser_type.launch(headless=headless)
-        return await self._playwright.chromium.launch(
-            channel=self._config.browser,
-            headless=headless,
-        )
+        browser_type = getattr(self._playwright, self._config.browser_name)
+        if self._config.browser_user_data_dir is not None and not self._config.browser_isolated:
+            self._playwright_context = await browser_type.launch_persistent_context(
+                str(self._config.browser_user_data_dir),
+                **launch_options,
+                **self._config.browser_context_options,
+            )
+            browser = self._playwright_context.browser
+            if browser is None:
+                raise ValueError("Persistent browser context did not expose a browser instance.")
+            return browser
+        return await browser_type.launch(**launch_options)
 
 
 def _blocks_on_modal_state(context: Context, tool: Tool) -> bool:

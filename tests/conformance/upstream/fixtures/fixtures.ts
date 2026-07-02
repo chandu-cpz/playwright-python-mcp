@@ -41,6 +41,8 @@ export type StartClient = (options?: {
   config?: object | string;
   roots?: { name: string; uri: string }[];
   rootsResponseDelay?: number;
+  env?: NodeJS.ProcessEnv;
+  noTimeoutForTest?: boolean;
 }) => Promise<{ client: Client; stderr: () => string }>;
 
 type TestFixtures = {
@@ -103,7 +105,10 @@ export const test = baseTest.extend<TestFixtures & TestOptions, WorkerFixtures>(
         });
       }
 
-      const { transport, stderr } = await createTransport(args, options?.cwd || testInfo.outputPath());
+      if (!options?.noTimeoutForTest && !args.some(arg => arg.startsWith('--timeout-action')))
+        args.push('--timeout-action=10000');
+
+      const { transport, stderr } = await createTransport(args, options?.cwd || testInfo.outputPath(), options?.env);
       let stderrBuffer = '';
       stderr?.on('data', data => {
         stderrBuffer += data.toString();
@@ -132,7 +137,7 @@ export const test = baseTest.extend<TestFixtures & TestOptions, WorkerFixtures>(
   },
 });
 
-async function createTransport(args: string[], cwd: string): Promise<{
+async function createTransport(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<{
   transport: Transport;
   stderr: Stream | null;
 }> {
@@ -145,6 +150,7 @@ async function createTransport(args: string[], cwd: string): Promise<{
     stderr: 'pipe',
     env: {
       ...process.env,
+      ...env,
       UV_CACHE_DIR: process.env.UV_CACHE_DIR ?? '/tmp/uv-cache',
       DEBUG_COLORS: '0',
       DEBUG_HIDE_DATE: '1',
