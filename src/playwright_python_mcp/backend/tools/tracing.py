@@ -31,6 +31,6 @@ async def _handle_stop_tracing(context: Context, _params: dict[str, Any], respon
 
 
 tracing_tools = [
-    Tool(name="browser_start_tracing", capability="tracing", tool_type="readOnly", handler=_handle_start_tracing),
-    Tool(name="browser_stop_tracing", capability="tracing", tool_type="readOnly", handler=_handle_stop_tracing),
+    Tool(name="browser_start_tracing", capability="devtools", tool_type="readOnly", handler=_handle_start_tracing),
+    Tool(name="browser_stop_tracing", capability="devtools", tool_type="readOnly", handler=_handle_stop_tracing),
 ]

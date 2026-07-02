@@ -17,6 +17,7 @@ await page.get_by_role("button", name="Submit").click()
 - MCP adapter: FastMCP
 - Browser runtime: Python Playwright
 - License: Apache-2.0
+- Tested Python versions: 3.12 locally; package metadata also supports 3.13
 
 FastMCP is used only as the MCP transport/tool adapter layer. Browser behavior lives in normal Python backend modules so the MCP framework remains replaceable.
 
@@ -138,7 +139,9 @@ Run `playwright-python-mcp --help` for the complete option list.
 
 ## Browser Profiles And Connections
 
-Persistent profile:
+By default, the server launches a persistent browser context using an auto-created profile under the user cache directory, matching upstream Playwright MCP session behavior.
+
+Explicit persistent profile:
 
 ```bash
 uvx playwright-python-mcp --user-data-dir ~/.cache/playwright-python-mcp/profile
@@ -149,6 +152,8 @@ Isolated session:
 ```bash
 uvx playwright-python-mcp --isolated --storage-state auth-state.json
 ```
+
+`--isolated` uses an ephemeral browser and cannot be combined with `--user-data-dir`.
 
 Existing browser over CDP:
 
@@ -236,6 +241,8 @@ The tag publish workflow runs both the Python gates and the adapted upstream con
 ## Known Limitations
 
 - `browser_annotate` is intentionally not exposed. Upstream implements it through the Node.js Playwright Dashboard daemon; this port does not ship that daemon. A Python-native equivalent may be added later if the dashboard workflow is ported.
+- `browser.initPage` / `--init-page` is parsed for config compatibility but not executed. Upstream loads a JavaScript module and calls its default export against each new page; this Python package does not execute Node.js init-page modules.
+- HTTP transport currently uses one backend instance for the server process. This gives shared browser state, but it is not yet the full upstream per-client backend factory model.
 - A small number of conformance tests are explicitly skipped for fixture or environment gaps, including bound-browser debugger closure, remote endpoint storage-state coverage, CDP first-tab reuse coverage, and record-video coverage.
 
 ## Security

@@ -62,6 +62,11 @@ class Context:
         self.trace_file: Path | None = None
         self.video_file: Path | None = None
 
+    async def initialize(self) -> None:
+        await self._setup_request_interception()
+        for init_script in self.config.init_scripts:
+            await self._browser_context.add_init_script(path=init_script)
+
     def has_tab(self) -> bool:
         return self._current_tab is not None
 
@@ -166,6 +171,14 @@ class Context:
         if parsed.scheme == "file" and not self.config.allow_unrestricted_file_access:
             raise ValueError(f'Error: Access to "file:" protocol is blocked. Attempted URL: "{url}"')
 
+    async def _setup_request_interception(self) -> None:
+        if self.config.allowed_origins:
+            await self._browser_context.route("**", _abort_route)
+            for origin in self.config.allowed_origins:
+                await self._browser_context.route(_origin_or_host_glob(origin), _continue_route)
+        for origin in self.config.blocked_origins:
+            await self._browser_context.route(_origin_or_host_glob(origin), _abort_route)
+
     async def workspace_file(self, file_name: str, per_call_workspace_dir: Path | None = None) -> Path:
         workspace = per_call_workspace_dir or self.cwd
         resolved = (workspace / file_name).resolve()
@@ -234,3 +247,20 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+async def _abort_route(route: Any) -> None:
+    await route.abort("blockedbyclient")
+
+
+async def _continue_route(route: Any) -> None:
+    await route.continue_()
+
+
+def _origin_or_host_glob(origin_or_host: str) -> str:
+    if origin_or_host.startswith(("http://", "https://")) and origin_or_host.endswith(":*"):
+        return f"{origin_or_host}/**"
+    parsed = urlparse(origin_or_host)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}/**"
+    return f"*://{origin_or_host}/**"

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import os
+import sys
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastmcp.tools.base import ToolResult
@@ -59,7 +64,6 @@ class BrowserBackend:
         except ValueError as exc:
             return ToolResult(content=f"### Error\n{exc}", is_error=True)
         except Exception as exc:
-            await self.close()
             return ToolResult(content=f"### Error\n{exc}", is_error=True)
 
         if response.is_close:
@@ -118,6 +122,7 @@ class BrowserBackend:
         if self._config.navigation_timeout is not None:
             browser_context.set_default_navigation_timeout(self._config.navigation_timeout)
         self._context = Context(browser_context, self._config)
+        await self._context.initialize()
         if self._config.save_session:
             self._session_log = await SessionLog.create(self._context)
             self._context.session_log = self._session_log
@@ -130,6 +135,7 @@ class BrowserBackend:
                 self._config.cdp_endpoint,
                 headers=self._config.cdp_headers,
                 timeout=self._config.cdp_timeout,
+                artifacts_dir=self._traces_dir(),
             )
             return self._browser
         if self._config.remote_endpoint:
@@ -172,11 +178,25 @@ class BrowserBackend:
         if not headless and os.name == "posix" and not os.environ.get("DISPLAY"):
             headless = True
         launch_options["headless"] = headless
+        launch_options.setdefault("traces_dir", self._traces_dir())
+        launch_options["handle_sigint"] = False
+        launch_options["handle_sigterm"] = False
 
         browser_type = getattr(self._playwright, self._config.browser_name)
-        if self._config.browser_user_data_dir is not None and not self._config.browser_isolated:
+        if self._config.browser_user_data_dir is not None and self._config.browser_isolated:
+            raise ValueError("Browser userDataDir is not supported in isolated mode.")
+        if not self._config.browser_isolated:
+            user_data_dir = self._config.browser_user_data_dir or await self._default_user_data_dir()
+            if await _is_profile_locked_5_times(user_data_dir):
+                raise ValueError(
+                    f"Browser is already in use for {user_data_dir}, "
+                    "use --isolated to run multiple instances of the same browser"
+                )
+            launch_options["ignore_default_args"] = _persistent_ignore_default_args(
+                launch_options.get("ignore_default_args")
+            )
             self._playwright_context = await browser_type.launch_persistent_context(
-                str(self._config.browser_user_data_dir),
+                user_data_dir,
                 **launch_options,
                 **self._config.browser_context_options,
             )
@@ -185,6 +205,17 @@ class BrowserBackend:
                 raise ValueError("Persistent browser context did not expose a browser instance.")
             return browser
         return await browser_type.launch(**launch_options)
+
+    def _traces_dir(self) -> Path:
+        return _output_dir(self._config, Path.cwd()) / "traces"
+
+    async def _default_user_data_dir(self) -> Path:
+        cache_root = _cache_root() / "ms-playwright-mcp"
+        browser_token = self._config.browser_channel or self._config.browser_name
+        cwd_hash = hashlib.sha256(str(Path.cwd()).encode()).hexdigest()[:7]
+        user_data_dir = cache_root / f"mcp-{browser_token}-{cwd_hash}"
+        user_data_dir.mkdir(parents=True, exist_ok=True)
+        return user_data_dir
 
 
 def _blocks_on_modal_state(context: Context, tool: Tool) -> bool:
@@ -195,3 +226,64 @@ def _blocks_on_modal_state(context: Context, tool: Tool) -> bool:
     if not modal_states:
         return False
     return not any(state.get("type") == tool.clears_modal_state for state in modal_states)
+
+
+def _output_dir(config: ServerConfig, cwd: Path) -> Path:
+    if config.output_dir is not None:
+        return config.output_dir.resolve()
+    base_name = ".playwright-mcp"
+    if _is_system_directory(cwd) or not os.access(cwd, os.W_OK):
+        return Path(tempfile.gettempdir()) / base_name
+    return cwd / base_name
+
+
+def _cache_root() -> Path:
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches"
+    if os.name == "nt":
+        return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+
+
+def _is_system_directory(path: Path) -> bool:
+    resolved = path.resolve()
+    return resolved in {Path("/"), Path("/tmp"), Path("/var"), Path("/usr"), Path("/bin"), Path("/etc")}
+
+
+def _persistent_ignore_default_args(value: Any) -> bool | list[str]:
+    if value is True:
+        return True
+    args: list[str] = [str(item) for item in value] if isinstance(value, list) else []
+    return ["--disable-extensions", *args]
+
+
+async def _is_profile_locked_5_times(user_data_dir: Path) -> bool:
+    for _ in range(5):
+        if not _is_profile_locked(user_data_dir):
+            return False
+        await asyncio.sleep(1)
+    return True
+
+
+def _is_profile_locked(user_data_dir: Path) -> bool:
+    lock_file = "lockfile" if os.name == "nt" else "SingletonLock"
+    lock_path = user_data_dir / lock_file
+    if os.name == "nt":
+        if not lock_path.exists():
+            return False
+        try:
+            with lock_path.open("r+b"):
+                return False
+        except OSError:
+            return True
+
+    try:
+        target = os.readlink(lock_path)
+        pid = int(target.rsplit("-", 1)[-1])
+    except (OSError, ValueError):
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False

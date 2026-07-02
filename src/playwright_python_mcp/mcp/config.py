@@ -61,6 +61,10 @@ class ServerConfig:
     cdp_timeout: int | None = None
     remote_endpoint: str | None = None
     remote_headers: dict[str, str] | None = None
+    init_scripts: list[Path] = field(default_factory=list)
+    init_pages: list[Path] = field(default_factory=list)
+    allowed_origins: list[str] = field(default_factory=list)
+    blocked_origins: list[str] = field(default_factory=list)
     extension: bool = False
     server_host: str | None = None
     server_port: int | None = None
@@ -271,6 +275,8 @@ def _parse_ini_value(key: str, value: str) -> Any:
         return value == "true"
     if key == "capabilities":
         return [item.strip() for item in value.split(",") if item.strip()]
+    if key.endswith(("initScript", "initPage")):
+        return [item.strip() for item in value.split(";") if item.strip()]
     if key.endswith(("allowedOrigins", "blockedOrigins")):
         return [item.strip() for item in value.split(";") if item.strip()]
     if key.endswith("viewport"):
@@ -284,6 +290,10 @@ def _validate_and_complete(config: dict[str, Any]) -> None:
     browser = config.setdefault("browser", {})
     launch_options = browser.setdefault("launchOptions", {})
     context_options = browser.setdefault("contextOptions", {})
+    if browser.get("isolated") and browser.get("userDataDir"):
+        raise ValueError("Browser userDataDir is not supported in isolated mode.")
+    if browser.get("isolated") and browser.get("cdpEndpoint"):
+        raise ValueError("Browser CDP endpoint is not supported in isolated mode.")
     browser_name, default_channel = _resolve_browser_param(None)
     browser["browserName"] = browser.get("browserName") or browser_name
     if launch_options.get("channel") is None and browser.get("browserName") == "chromium":
@@ -333,6 +343,10 @@ def _server_config_from_merged(config: dict[str, Any]) -> ServerConfig:
         cdp_timeout=browser.get("cdpTimeout"),
         remote_endpoint=browser.get("remoteEndpoint"),
         remote_headers=browser.get("remoteHeaders"),
+        init_scripts=[Path(value) for value in browser.get("initScript", [])],
+        init_pages=[Path(value) for value in browser.get("initPage", [])],
+        allowed_origins=list(config.get("network", {}).get("allowedOrigins") or []),
+        blocked_origins=list(config.get("network", {}).get("blockedOrigins") or []),
         extension=bool(config.get("extension", False)),
         server_host=server.get("host"),
         server_port=server.get("port"),
@@ -348,6 +362,12 @@ def _to_python_launch_options(options: dict[str, Any]) -> dict[str, Any]:
         "headless": "headless",
         "chromiumSandbox": "chromium_sandbox",
         "proxy": "proxy",
+        "ignoreDefaultArgs": "ignore_default_args",
+        "handleSIGINT": "handle_sigint",
+        "handleSIGTERM": "handle_sigterm",
+        "handleSIGHUP": "handle_sighup",
+        "tracesDir": "traces_dir",
+        "artifactsDir": "artifacts_dir",
     }
     return {mapping[key]: value for key, value in options.items() if key in mapping and value is not None}
 

@@ -103,6 +103,39 @@ def test_filtered_tools_hide_skill_only_tools() -> None:
     assert hidden_names.isdisjoint({tool.name for tool in filtered_tools(_config())})
 
 
+def test_devtools_capability_exposes_tracing_tools() -> None:
+    config = load_config(
+        browser=None,
+        caps="devtools",
+        config_path=None,
+        headless=True,
+        test_id_attribute="data-testid",
+        vision=False,
+    )
+
+    names = {tool.name for tool in filtered_tools(config)}
+
+    assert "browser_start_tracing" in names
+    assert "browser_stop_tracing" in names
+
+
+def test_tracing_capability_alias_exposes_devtools_tools() -> None:
+    config = load_config(
+        browser=None,
+        caps="tracing",
+        config_path=None,
+        headless=True,
+        test_id_attribute="data-testid",
+        vision=False,
+    )
+
+    names = {tool.name for tool in filtered_tools(config)}
+
+    assert "browser_start_tracing" in names
+    assert "browser_stop_tracing" in names
+    assert "browser_resume" in names
+
+
 def test_response_does_not_capture_aria_snapshot_without_request(tmp_path) -> None:
     async def run() -> None:
         tab = FakeTab()

@@ -57,6 +57,32 @@ def test_ini_config_resolution(tmp_path: Path) -> None:
     assert public["browser"]["contextOptions"]["bypassCSP"] is True
 
 
+def test_runtime_fields_include_init_scripts_and_network_filters(tmp_path: Path) -> None:
+    init_script = tmp_path / "init.js"
+    init_script.write_text("window.__ready = true;", encoding="utf-8")
+    config_file = tmp_path / "config.ini"
+    config_file.write_text(
+        f"""
+        browser.initScript = {init_script.name}
+        network.allowedOrigins = https://example.com;http://localhost:*
+        network.blockedOrigins = https://blocked.example
+        """
+    )
+
+    config = load_config(
+        browser=None,
+        caps="config",
+        config_path=config_file,
+        headless=True,
+        test_id_attribute="data-testid",
+        vision=False,
+    )
+
+    assert config.init_scripts == [init_script.resolve()]
+    assert config.allowed_origins == ["https://example.com", "http://localhost:*"]
+    assert config.blocked_origins == ["https://blocked.example"]
+
+
 def test_remote_endpoint_headers_are_preserved() -> None:
     config = load_config(
         browser=None,
@@ -87,3 +113,21 @@ def test_save_session_config_is_preserved() -> None:
 
     assert config.save_session is True
     assert config.as_public_dict()["saveSession"] is True
+
+
+def test_isolated_rejects_user_data_dir(tmp_path: Path) -> None:
+    try:
+        load_config(
+            browser=None,
+            caps="config",
+            config_path=None,
+            headless=True,
+            test_id_attribute="data-testid",
+            vision=False,
+            isolated=True,
+            user_data_dir=str(tmp_path / "profile"),
+        )
+    except ValueError as exc:
+        assert "userDataDir is not supported in isolated mode" in str(exc)
+    else:
+        raise AssertionError("Expected isolated user data dir validation error")

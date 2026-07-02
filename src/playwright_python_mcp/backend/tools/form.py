@@ -1,11 +1,18 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 from playwright_python_mcp.backend.codegen import python_call, python_literal
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
 from playwright_python_mcp.backend.tool import Tool, param
+
+
+class FormField(TypedDict):
+    name: str
+    target: str
+    type: Literal["textbox", "checkbox", "radio", "combobox", "slider"]
+    value: str
 
 
 async def _handle_fill_form(context: Context, params: dict[str, Any], response: Response) -> None:
@@ -30,7 +37,7 @@ form_tools = [
     Tool(
         name="browser_fill_form",
         capability="core",
-        parameters=(param("fields", list[dict[str, str]]),),
+        parameters=(param("fields", list[FormField]),),
         handler=_handle_fill_form,
     )
 ]

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import signal
 from dataclasses import dataclass
 from functools import wraps
+from importlib.metadata import PackageNotFoundError, version
 from inspect import Parameter, Signature
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import unquote, urlparse
 
+import anyio
 from fastmcp import FastMCP
 from fastmcp.server.context import Context as FastMCPContext
 from mcp.types import ToolAnnotations
@@ -21,13 +24,17 @@ from playwright_python_mcp.mcp.config import ServerConfig
 class PlaywrightMCPServer:
     app: FastMCP
     config: ServerConfig
+    backend: BrowserBackend
 
     def run(self) -> None:
+        anyio.run(self.run_async)
+
+    async def run_async(self) -> None:
         if self.config.server_port is None:
-            self.app.run(transport="stdio", show_banner=False, log_level="ERROR")
+            await self._run_with_watchdog("stdio", show_banner=False, log_level="ERROR")
             return
-        self.app.run(
-            transport="http",
+        await self._run_with_watchdog(
+            "http",
             host=self.config.server_host or "localhost",
             port=self.config.server_port,
             show_banner=False,
@@ -35,11 +42,31 @@ class PlaywrightMCPServer:
             middleware=_http_middleware(self.config),
         )
 
+    async def _run_with_watchdog(
+        self,
+        transport: Literal["stdio", "http", "sse", "streamable-http"],
+        **transport_kwargs: Any,
+    ) -> None:
+        async def watch_signals(scope: anyio.CancelScope) -> None:
+            with anyio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as signals:
+                async for _signum in signals:
+                    scope.cancel()
+                    return
+
+        with anyio.CancelScope() as scope:
+            async with anyio.create_task_group() as task_group:
+                task_group.start_soon(watch_signals, scope)
+                try:
+                    await self.app.run_async(transport=transport, **transport_kwargs)
+                finally:
+                    task_group.cancel_scope.cancel()
+                    await _close_backend_with_timeout(self.backend)
+
 
 def create_server(config: ServerConfig) -> PlaywrightMCPServer:
     tools = filtered_tools(config)
     backend = BrowserBackend(config, tools)
-    app = FastMCP(name="Playwright", version="0.1.0")
+    app = FastMCP(name="Playwright", version=_package_version())
 
     for tool in tools:
         handler = _make_fastmcp_handler(backend, tool.name)
@@ -65,7 +92,7 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
             run_in_thread=False,
         )(handler)
 
-    return PlaywrightMCPServer(app=app, config=config)
+    return PlaywrightMCPServer(app=app, config=config, backend=backend)
 
 
 class HostAllowlistMiddleware:
@@ -103,6 +130,13 @@ def _title_from_name(name: str) -> str:
     return name.removeprefix("browser_").replace("_", " ").title()
 
 
+def _package_version() -> str:
+    try:
+        return version("playwright-python-mcp")
+    except PackageNotFoundError:
+        return "0.0.0"
+
+
 async def _tool_handler(**_kwargs: Any):
     raise RuntimeError("unreachable")
 
@@ -120,3 +154,8 @@ async def _list_roots(ctx: FastMCPContext | None) -> list[str] | None:
         if uri.startswith("file://"):
             result.append(unquote(urlparse(uri).path))
     return result
+
+
+async def _close_backend_with_timeout(backend: BrowserBackend) -> None:
+    with anyio.move_on_after(15, shield=True):
+        await backend.close()
