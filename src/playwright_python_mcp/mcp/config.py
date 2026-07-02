@@ -58,6 +58,9 @@ class ServerConfig:
     cdp_endpoint: str | None = None
     cdp_headers: dict[str, str] | None = None
     cdp_timeout: int | None = None
+    remote_endpoint: str | None = None
+    remote_headers: dict[str, str] | None = None
+    extension: bool = False
     server_host: str | None = None
     server_port: int | None = None
     allowed_hosts: list[str] | None = None
@@ -163,6 +166,7 @@ def _config_from_cli(
                     "initPage": options.get("init_page"),
                     "initScript": options.get("init_script"),
                     "remoteEndpoint": options.get("endpoint"),
+                    "remoteHeaders": options.get("remote_header"),
                 }
             ),
             "extension": options.get("extension"),
@@ -325,6 +329,9 @@ def _server_config_from_merged(config: dict[str, Any]) -> ServerConfig:
         cdp_endpoint=browser.get("cdpEndpoint"),
         cdp_headers=browser.get("cdpHeaders"),
         cdp_timeout=browser.get("cdpTimeout"),
+        remote_endpoint=browser.get("remoteEndpoint"),
+        remote_headers=browser.get("remoteHeaders"),
+        extension=bool(config.get("extension", False)),
         server_host=server.get("host"),
         server_port=server.get("port"),
         allowed_hosts=server.get("allowedHosts"),

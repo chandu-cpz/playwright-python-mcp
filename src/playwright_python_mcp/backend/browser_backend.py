@@ -50,6 +50,9 @@ class BrowserBackend:
             result = await response.serialize()
         except ValueError as exc:
             return ToolResult(content=f"### Error\n{exc}", is_error=True)
+        except Exception as exc:
+            await self.close()
+            return ToolResult(content=f"### Error\n{exc}", is_error=True)
 
         if response.is_close:
             await self.close()
@@ -114,6 +117,17 @@ class BrowserBackend:
                 timeout=self._config.cdp_timeout,
             )
             return self._browser
+        if self._config.remote_endpoint:
+            self._browser = await self._playwright.chromium.connect(
+                self._config.remote_endpoint,
+                headers=self._config.remote_headers,
+            )
+            return self._browser
+        if self._config.extension:
+            raise ValueError(
+                "--extension requires the upstream Playwright browser-extension CDP relay, "
+                "which is not ported yet. Use --cdp-endpoint or --endpoint for existing browser connections."
+            )
 
         launch_options = dict(self._config.browser_launch_options)
         headless = bool(launch_options.get("headless", self._config.headless))

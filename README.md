@@ -42,9 +42,13 @@ uv run playwright-python-mcp install-browser chrome
 uv run playwright-python-mcp \
   --browser=chrome \
   --headless \
+  --host=127.0.0.1 \
+  --port=8931 \
   --caps=vision,pdf,storage,testing,config \
   --output-dir=.playwright-mcp
 ```
+
+When `--port` is provided, the server uses FastMCP Streamable HTTP transport at `/mcp`; otherwise it uses stdio.
 
 Supported configuration sources follow upstream merge order:
 

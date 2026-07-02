@@ -32,8 +32,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--cdp-endpoint",
+        "--cdp",
+        dest="cdp_endpoint",
         help="CDP endpoint to connect to.",
     )
+    parser.add_argument("--channel", dest="channel", help="Browser channel alias for --browser.")
     parser.add_argument("--cdp-header", action="append", help="CDP header, e.g. 'Authorization: Bearer token'.")
     parser.add_argument("--cdp-timeout", type=int, help="Timeout in milliseconds for connecting to CDP endpoint.")
     parser.add_argument(
@@ -85,6 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, help="Port to listen on for HTTP/SSE transport.")
     parser.add_argument("--proxy-bypass", help="Comma-separated proxy bypass domains.")
     parser.add_argument("--proxy-server", help="Proxy server URL.")
+    parser.add_argument("--remote-header", action="append", help="Header to send to --endpoint connections.")
     parser.add_argument("--save-session", action="store_true")
     parser.add_argument("--secrets", help="Path to dotenv file containing secrets.")
     parser.add_argument("--shared-browser-context", action="store_true")
@@ -120,7 +124,7 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(subprocess.call(cmd))
 
     config = load_config(
-        browser=args.browser,
+        browser=args.channel or args.browser,
         caps=args.caps,
         config_path=Path(args.config) if args.config else None,
         headless=args.headless,
@@ -152,6 +156,7 @@ def main(argv: list[str] | None = None) -> None:
         port=args.port,
         proxy_bypass=args.proxy_bypass,
         proxy_server=args.proxy_server,
+        remote_header=_headers(args.remote_header),
         sandbox=args.sandbox,
         save_session=args.save_session or None,
         secrets=_dotenv(Path(args.secrets)) if args.secrets else None,
