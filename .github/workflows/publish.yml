@@ -23,5 +23,10 @@ jobs:
       - run: uv run ty check
       - run: uv run mypy .
       - run: uv run pytest
+      - run: uv run playwright install --with-deps chromium
+      - run: npm ci
+        working-directory: tests/conformance/upstream
+      - run: npx playwright test --workers=10
+        working-directory: tests/conformance/upstream
       - run: uv build
       - run: uv publish --token ${{ secrets.PYPI_TOKEN }}

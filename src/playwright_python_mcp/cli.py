@@ -65,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--endpoint",
-        help="Bound browser endpoint. Parsed for config parity; direct endpoint transport is not implemented yet.",
+        help="Bound browser endpoint to connect to.",
     )
     parser.add_argument("--executable-path", help="Path to browser executable.")
     parser.add_argument("--extension", action="store_true")
