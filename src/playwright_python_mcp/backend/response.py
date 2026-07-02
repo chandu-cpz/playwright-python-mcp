@@ -175,6 +175,10 @@ class Response:
         if events:
             sections.append(("Events", events, None, False))
 
+        paused = self._render_paused()
+        if paused:
+            sections.append(("Paused", paused, None, False))
+
         await self._enforce_output_budget()
         text = self._serialize_sections(sections)
         is_error = any(section[3] for section in sections)
@@ -224,11 +228,33 @@ class Response:
                     )
         return events
 
+    def _render_paused(self) -> list[str]:
+        browser_context = getattr(self._context, "browser_context", lambda: None)()
+        debugger = getattr(browser_context, "debugger", None)
+        if debugger is None:
+            return []
+        paused_details_api = getattr(debugger, "paused_details", None)
+        paused_details = paused_details_api() if callable(paused_details_api) else paused_details_api
+        if not paused_details:
+            return []
+
+        title = _field(paused_details, "title") or "Paused"
+        location = _field(paused_details, "location") or {}
+        file_value = _field(location, "file")
+        line_value = _field(location, "line")
+        location_text = self._compute_relative_to(Path(str(file_value))) if file_value else ""
+        if line_value:
+            location_text += f":{line_value}"
+        return [
+            f"- {title} at {location_text}",
+            "- Use any tools to explore and interact, resume by calling resume/step-over/pause-at",
+        ]
+
     def _compute_relative_to(self, file_name: Path) -> str:
         import os
 
         rel = os.path.relpath(file_name, self._client_workspace)
-        if os.path.dirname(rel) == "." and not rel.startswith("."):
+        if os.path.dirname(rel) in {"", "."} and not rel.startswith("."):
             return "./" + rel
         return rel
 
@@ -304,6 +330,12 @@ def _result_meta(is_close: bool) -> dict[str, object] | None:
     if not is_close:
         return None
     return {"isClose": True}
+
+
+def _field(value: object, name: str) -> object | None:
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
 
 
 def _snapshot_mode(value: str) -> Literal["none", "full"]:

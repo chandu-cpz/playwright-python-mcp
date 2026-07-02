@@ -72,3 +72,18 @@ def test_remote_endpoint_headers_are_preserved() -> None:
     assert config.remote_endpoint == "ws://example.invalid"
     assert config.remote_headers == {"Authorization": "Bearer token"}
     assert config.as_public_dict()["browser"]["remoteHeaders"] == {"Authorization": "Bearer token"}
+
+
+def test_save_session_config_is_preserved() -> None:
+    config = load_config(
+        browser=None,
+        caps="config",
+        config_path=None,
+        headless=True,
+        test_id_attribute="data-testid",
+        vision=False,
+        save_session=True,
+    )
+
+    assert config.save_session is True
+    assert config.as_public_dict()["saveSession"] is True

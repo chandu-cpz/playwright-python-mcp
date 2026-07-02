@@ -43,6 +43,7 @@ class ServerConfig:
     output_dir: Path | None = None
     output_max_size: int | None = None
     output_mode: str = "file"
+    save_session: bool = False
     secrets: dict[str, str] | None = None
     snapshot_mode: str = "full"
     action_timeout: int | None = 5000
@@ -314,6 +315,7 @@ def _server_config_from_merged(config: dict[str, Any]) -> ServerConfig:
         output_dir=Path(config["outputDir"]) if config.get("outputDir") else None,
         output_max_size=config.get("outputMaxSize"),
         output_mode=str(config.get("outputMode") or "file"),
+        save_session=bool(config.get("saveSession", False)),
         secrets=config.get("secrets"),
         snapshot_mode=str(snapshot.get("mode") or "full"),
         action_timeout=timeouts.get("action"),

@@ -14,6 +14,7 @@ from playwright_python_mcp.mcp.config import ServerConfig
 from .codegen import python_literal
 
 if TYPE_CHECKING:
+    from .session_log import SessionLog
     from .tab import Tab
 
 
@@ -57,6 +58,7 @@ class Context:
         self._tabs: list[Tab] = []
         self._current_tab: Tab | None = None
         self._routes: list[RouteEntry] = []
+        self.session_log: SessionLog | None = None
         self.trace_file: Path | None = None
         self.video_file: Path | None = None
 

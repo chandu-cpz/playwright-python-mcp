@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
+from playwright_python_mcp.backend.session_log import SessionLog
 from playwright_python_mcp.backend.tab import TabHeader, TabSnapshot
 from playwright_python_mcp.backend.tools import filtered_tools
 from playwright_python_mcp.mcp.config import load_config
@@ -167,6 +168,43 @@ def test_action_snapshot_respects_none_mode(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
+def test_response_includes_paused_debugger_section(tmp_path: Path) -> None:
+    async def run() -> None:
+        context = FakeContext(FakeTab(), tmp_path)
+        context.debugger.paused_details = {
+            "title": "Paused on breakpoint",
+            "location": {"file": str(tmp_path / "example.py"), "line": 12},
+        }
+        response = Response(cast(Context, context), tool_name="browser_snapshot", tool_args={})
+
+        result = await response.serialize()
+
+        assert isinstance(result, str)
+        assert "### Paused" in result
+        assert "- Paused on breakpoint at ./example.py:12" in result
+        assert "resume by calling resume/step-over/pause-at" in result
+
+    asyncio.run(run())
+
+
+def test_session_log_writes_markdown_summary(tmp_path: Path) -> None:
+    async def run() -> None:
+        session_log = SessionLog(folder=tmp_path / "session-1", cwd=tmp_path)
+        await session_log.log_response(
+            "browser_snapshot",
+            {"filename": "page.yml"},
+            "### Result\nok\n### Snapshot\n```yaml\n- button \"Submit\" [ref=e1]\n```",
+        )
+
+        content = (tmp_path / "session-1" / "session.md").read_text(encoding="utf-8")
+        assert "### Tool call: browser_snapshot" in content
+        assert '"filename": "page.yml"' in content
+        assert '"result": "ok"' in content
+        assert '"inlineSnapshot": "- button \\"Submit\\" [ref=e1]"' in content
+
+    asyncio.run(run())
+
+
 class FakeTab:
     def __init__(self, aria_snapshot: str = "") -> None:
         self.capture_kwargs: dict[str, Any] | None = None
@@ -183,6 +221,7 @@ class FakeTab:
 class FakeContext:
     def __init__(self, tab: FakeTab, cwd: Path, *, snapshot_mode: str = "none") -> None:
         self.cwd = cwd
+        self.debugger = FakeDebugger()
         self.config = SimpleNamespace(
             codegen="python",
             snapshot_mode=snapshot_mode,
@@ -197,8 +236,21 @@ class FakeContext:
     def tabs(self) -> list[FakeTab]:
         return [self._tab]
 
+    def browser_context(self) -> FakeBrowserContext:
+        return FakeBrowserContext(self.debugger)
+
     def redact_secrets(self, text: str) -> str:
         return text
 
     async def output_file(self, template: Any, origin: str) -> Path:
         return self.cwd / f"{template.prefix}.{template.ext}"
+
+
+class FakeBrowserContext:
+    def __init__(self, debugger: FakeDebugger) -> None:
+        self.debugger = debugger
+
+
+class FakeDebugger:
+    def __init__(self) -> None:
+        self.paused_details: Any = None

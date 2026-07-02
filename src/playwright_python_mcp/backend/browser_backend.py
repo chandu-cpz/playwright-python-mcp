@@ -11,6 +11,7 @@ from playwright_python_mcp.mcp.config import ServerConfig
 from .context import Context
 from .extension_relay import CDPRelayServer
 from .response import Response
+from .session_log import SessionLog
 from .tool import Tool
 
 
@@ -29,6 +30,7 @@ class BrowserBackend:
         self._playwright_context: PlaywrightBrowserContext | None = None
         self._extension_relay: CDPRelayServer | None = None
         self._context: Context | None = None
+        self._session_log: SessionLog | None = None
 
     def has_page(self) -> bool:
         return self._context is not None and self._context.has_tab()
@@ -50,6 +52,8 @@ class BrowserBackend:
                 return await response.serialize()
             await tool.handler(context, args, response)
             result = await response.serialize()
+            if self._session_log is not None:
+                await self._session_log.log_response(name, args, result)
         except ValueError as exc:
             return ToolResult(content=f"### Error\n{exc}", is_error=True)
         except Exception as exc:
@@ -74,6 +78,7 @@ class BrowserBackend:
         self._playwright_context = None
         self._extension_relay = None
         self._context = None
+        self._session_log = None
 
     async def render_page_markdown(self) -> list[str]:
         tab = await self._ensure_tab()
@@ -111,6 +116,9 @@ class BrowserBackend:
         if self._config.navigation_timeout is not None:
             browser_context.set_default_navigation_timeout(self._config.navigation_timeout)
         self._context = Context(browser_context, self._config)
+        if self._config.save_session:
+            self._session_log = await SessionLog.create(self._context)
+            self._context.session_log = self._session_log
         return self._context
 
     async def _launch_browser(self) -> Browser:
