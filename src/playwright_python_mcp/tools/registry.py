@@ -39,6 +39,10 @@ VISION_TOOL_NAMES = [
 
 TESTING_TOOL_NAMES = [
     "browser_generate_locator",
+    "browser_verify_element_visible",
+    "browser_verify_text_visible",
+    "browser_verify_list_visible",
+    "browser_verify_value",
 ]
 
 NETWORK_TOOL_NAMES = [
@@ -54,11 +58,19 @@ TRACING_TOOL_NAMES = [
 ]
 
 DEVTOOLS_TOOL_NAMES = [
+    "browser_resume",
+    "browser_highlight",
+    "browser_hide_highlight",
+    "browser_annotate",
     "browser_start_video",
     "browser_stop_video",
     "browser_video_chapter",
     "browser_video_show_actions",
     "browser_video_hide_actions",
+]
+
+CONFIG_TOOL_NAMES = [
+    "browser_get_config",
 ]
 
 STORAGE_TOOL_NAMES = [

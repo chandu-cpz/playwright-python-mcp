@@ -3,6 +3,7 @@ from __future__ import annotations
 from playwright_python_mcp.mcp.config import ServerConfig
 from playwright_python_mcp.tools.registry import (
     CORE_TOOL_NAMES,
+    CONFIG_TOOL_NAMES,
     DEVTOOLS_TOOL_NAMES,
     NETWORK_TOOL_NAMES,
     PDF_TOOL_NAMES,
@@ -14,9 +15,11 @@ from playwright_python_mcp.tools.registry import (
 
 from ..tool import Tool
 from .common import common_tools
+from .config import config_tools
 from .console import console_tools
 from .cookies import cookie_tools
 from .dialogs import dialog_tools
+from .devtools import devtools_tools
 from .evaluate import evaluate_tools
 from .files import file_tools
 from .form import form_tools
@@ -33,15 +36,18 @@ from .storage import storage_tools
 from .tabs import tabs_tools
 from .tracing import tracing_tools
 from .video import video_tools
+from .verify import verify_tools
 from .webstorage import webstorage_tools
 from .wait import wait_tools
 
 
 IMPLEMENTED_TOOLS = [
     *common_tools,
+    *config_tools,
     *console_tools,
     *cookie_tools,
     *dialog_tools,
+    *devtools_tools,
     *evaluate_tools,
     *file_tools,
     *form_tools,
@@ -58,6 +64,7 @@ IMPLEMENTED_TOOLS = [
     *tabs_tools,
     *tracing_tools,
     *video_tools,
+    *verify_tools,
     *webstorage_tools,
     *wait_tools,
 ]
@@ -79,6 +86,8 @@ def filtered_tools(config: ServerConfig) -> list[Tool]:
         visible_names.update(STORAGE_TOOL_NAMES)
     if config.caps and "testing" in config.caps:
         visible_names.update(TESTING_TOOL_NAMES)
+    if config.caps and "config" in config.caps:
+        visible_names.update(CONFIG_TOOL_NAMES)
 
     implemented_by_name = {tool.name: tool for tool in IMPLEMENTED_TOOLS}
     result = [
