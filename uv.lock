@@ -919,6 +919,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
     { name = "playwright" },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -933,6 +934,7 @@ dev = [
 requires-dist = [
     { name = "fastmcp", specifier = ">=3.4.2" },
     { name = "playwright", specifier = ">=1.61.0" },
+    { name = "websockets", specifier = ">=14.0" },
 ]
 
 [package.metadata.requires-dev]

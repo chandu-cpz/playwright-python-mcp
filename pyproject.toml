@@ -9,6 +9,7 @@ requires-python = ">=3.12"
 dependencies = [
     "fastmcp>=3.4.2",
     "playwright>=1.61.0",
+    "websockets>=14.0",
 ]
 
 [project.scripts]
