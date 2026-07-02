@@ -34,6 +34,7 @@ console_tools = [
     Tool(
         name="browser_console_messages",
         capability="core",
+        tool_type="readOnly",
         parameters=(
             param("level", str, "info"),
             param("all", bool, False),
@@ -44,6 +45,7 @@ console_tools = [
     Tool(
         name="browser_console_clear",
         capability="core",
+        tool_type="readOnly",
         handler=_handle_console_clear,
         skill_only=True,
     ),

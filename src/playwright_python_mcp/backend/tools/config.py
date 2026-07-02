@@ -13,5 +13,5 @@ async def _handle_get_config(context: Context, _params: dict[str, Any], response
 
 
 config_tools = [
-    Tool(name="browser_get_config", capability="config", handler=_handle_get_config),
+    Tool(name="browser_get_config", capability="config", tool_type="readOnly", handler=_handle_get_config),
 ]

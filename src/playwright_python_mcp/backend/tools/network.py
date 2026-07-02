@@ -276,6 +276,7 @@ network_tools = [
     Tool(
         name="browser_network_requests",
         capability="core",
+        tool_type="readOnly",
         parameters=(
             param("static", bool, False),
             param("filter", str | None, None),
@@ -286,6 +287,7 @@ network_tools = [
     Tool(
         name="browser_network_request",
         capability="core",
+        tool_type="readOnly",
         parameters=(
             param("index", int),
             param("part", RequestPart | None, None),
@@ -296,6 +298,7 @@ network_tools = [
     Tool(
         name="browser_network_clear",
         capability="core",
+        tool_type="readOnly",
         handler=_handle_network_clear,
         skill_only=True,
     ),

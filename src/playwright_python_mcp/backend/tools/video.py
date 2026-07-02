@@ -62,19 +62,22 @@ video_tools = [
     Tool(
         name="browser_start_video",
         capability="devtools",
+        tool_type="readOnly",
         parameters=(param("filename", str | None, None), param("size", dict[str, int] | None, None)),
         handler=_handle_start_video,
     ),
-    Tool(name="browser_stop_video", capability="devtools", handler=_handle_stop_video),
+    Tool(name="browser_stop_video", capability="devtools", tool_type="readOnly", handler=_handle_stop_video),
     Tool(
         name="browser_video_chapter",
         capability="devtools",
+        tool_type="readOnly",
         parameters=(param("title", str), param("description", str | None, None), param("duration", int | float | None, None)),
         handler=_handle_video_chapter,
     ),
     Tool(
         name="browser_video_show_actions",
         capability="devtools",
+        tool_type="readOnly",
         parameters=(
             param("duration", int | float | None, None),
             param("position", ActionPosition | None, None),
@@ -82,5 +85,5 @@ video_tools = [
         ),
         handler=_handle_show_actions,
     ),
-    Tool(name="browser_video_hide_actions", capability="devtools", handler=_handle_hide_actions),
+    Tool(name="browser_video_hide_actions", capability="devtools", tool_type="readOnly", handler=_handle_hide_actions),
 ]

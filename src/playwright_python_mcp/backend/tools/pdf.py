@@ -22,6 +22,7 @@ pdf_tools = [
     Tool(
         name="browser_pdf_save",
         capability="pdf",
+        tool_type="readOnly",
         parameters=(param("filename", str | None, None),),
         handler=_handle_pdf_save,
     )

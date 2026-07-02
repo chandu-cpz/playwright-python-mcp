@@ -39,6 +39,54 @@ def test_fastmcp_registration_is_non_threaded_and_has_metadata() -> None:
     asyncio.run(run())
 
 
+def test_fastmcp_read_only_annotations_match_tool_surface() -> None:
+    async def run() -> None:
+        server = create_server(
+            load_config(
+                browser=None,
+                caps="pdf,vision,network,tracing,devtools,storage,testing,config",
+                config_path=None,
+                headless=True,
+                test_id_attribute="data-testid",
+                vision=False,
+            )
+        )
+
+        read_only_names = {
+            "browser_snapshot",
+            "browser_console_messages",
+            "browser_take_screenshot",
+            "browser_get_config",
+            "browser_pdf_save",
+            "browser_route_list",
+            "browser_storage_state",
+            "browser_localstorage_list",
+            "browser_start_tracing",
+            "browser_start_video",
+        }
+        action_or_input_names = {
+            "browser_click",
+            "browser_type",
+            "browser_navigate",
+            "browser_cookie_set",
+            "browser_route",
+            "browser_set_storage_state",
+            "browser_mouse_click_xy",
+        }
+
+        for name in read_only_names:
+            tool = cast(Any, await server.app.get_tool(name))
+            assert tool.annotations is not None
+            assert tool.annotations.readOnlyHint is True, name
+
+        for name in action_or_input_names:
+            tool = cast(Any, await server.app.get_tool(name))
+            assert tool.annotations is not None
+            assert tool.annotations.readOnlyHint is False, name
+
+    asyncio.run(run())
+
+
 def test_filtered_tools_hide_skill_only_tools() -> None:
     hidden_names = {
         "browser_press_sequentially",

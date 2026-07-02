@@ -73,8 +73,8 @@ def _with_kind(handler, kind: StorageKind):
 
 
 webstorage_tools = [
-    Tool("browser_localstorage_list", "storage", _with_kind(_handle_list, "localStorage")),
-    Tool("browser_localstorage_get", "storage", _with_kind(_handle_get, "localStorage"), (param("key", str),)),
+    Tool("browser_localstorage_list", "storage", _with_kind(_handle_list, "localStorage"), tool_type="readOnly"),
+    Tool("browser_localstorage_get", "storage", _with_kind(_handle_get, "localStorage"), (param("key", str),), tool_type="readOnly"),
     Tool(
         "browser_localstorage_set",
         "storage",
@@ -83,8 +83,14 @@ webstorage_tools = [
     ),
     Tool("browser_localstorage_delete", "storage", _with_kind(_handle_delete, "localStorage"), (param("key", str),)),
     Tool("browser_localstorage_clear", "storage", _with_kind(_handle_clear, "localStorage")),
-    Tool("browser_sessionstorage_list", "storage", _with_kind(_handle_list, "sessionStorage")),
-    Tool("browser_sessionstorage_get", "storage", _with_kind(_handle_get, "sessionStorage"), (param("key", str),)),
+    Tool("browser_sessionstorage_list", "storage", _with_kind(_handle_list, "sessionStorage"), tool_type="readOnly"),
+    Tool(
+        "browser_sessionstorage_get",
+        "storage",
+        _with_kind(_handle_get, "sessionStorage"),
+        (param("key", str),),
+        tool_type="readOnly",
+    ),
     Tool(
         "browser_sessionstorage_set",
         "storage",

@@ -30,6 +30,7 @@ storage_tools = [
     Tool(
         name="browser_storage_state",
         capability="storage",
+        tool_type="readOnly",
         parameters=(param("filename", str | None, None),),
         handler=_handle_storage_state,
     ),

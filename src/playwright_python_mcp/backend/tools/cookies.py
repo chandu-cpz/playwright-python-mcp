@@ -66,8 +66,14 @@ async def _handle_cookie_clear(context: Context, _params: dict[str, Any], respon
 
 
 cookie_tools = [
-    Tool("browser_cookie_list", "storage", _handle_cookie_list, (param("domain", str | None, None), param("path", str | None, None))),
-    Tool("browser_cookie_get", "storage", _handle_cookie_get, (param("name", str),)),
+    Tool(
+        "browser_cookie_list",
+        "storage",
+        _handle_cookie_list,
+        (param("domain", str | None, None), param("path", str | None, None)),
+        tool_type="readOnly",
+    ),
+    Tool("browser_cookie_get", "storage", _handle_cookie_get, (param("name", str),), tool_type="readOnly"),
     Tool(
         "browser_cookie_set",
         "storage",

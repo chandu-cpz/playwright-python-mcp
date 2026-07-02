@@ -101,14 +101,16 @@ devtools_tools = [
     Tool(
         name="browser_highlight",
         capability="devtools",
+        tool_type="readOnly",
         parameters=(param("target", str), param("element", str), param("style", str | None, None)),
         handler=_handle_highlight,
     ),
     Tool(
         name="browser_hide_highlight",
         capability="devtools",
+        tool_type="readOnly",
         parameters=(param("target", str | None, None), param("element", str | None, None)),
         handler=_handle_hide_highlight,
     ),
-    Tool(name="browser_annotate", capability="devtools", handler=_handle_annotate),
+    Tool(name="browser_annotate", capability="devtools", tool_type="readOnly", handler=_handle_annotate),
 ]

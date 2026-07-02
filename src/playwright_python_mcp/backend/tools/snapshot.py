@@ -85,6 +85,7 @@ snapshot_tools = [
     Tool(
         name="browser_snapshot",
         capability="core",
+        tool_type="readOnly",
         parameters=(
             param("target", str | None, None),
             param("filename", str | None, None),
@@ -135,6 +136,7 @@ snapshot_tools = [
     Tool(
         name="browser_generate_locator",
         capability="testing",
+        tool_type="readOnly",
         parameters=(param("target", str), param("element", str | None, None)),
         handler=_handle_generate_locator,
     ),

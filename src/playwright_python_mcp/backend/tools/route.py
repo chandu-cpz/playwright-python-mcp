@@ -97,7 +97,7 @@ route_tools = [
         ),
         handler=_handle_route,
     ),
-    Tool(name="browser_route_list", capability="network", handler=_handle_route_list),
+    Tool(name="browser_route_list", capability="network", tool_type="readOnly", handler=_handle_route_list),
     Tool(
         name="browser_unroute",
         capability="network",

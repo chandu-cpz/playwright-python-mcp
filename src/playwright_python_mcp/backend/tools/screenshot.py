@@ -69,6 +69,7 @@ screenshot_tools = [
     Tool(
         name="browser_take_screenshot",
         capability="core",
+        tool_type="readOnly",
         parameters=(
             param("target", str | None, None),
             param("element", str | None, None),
