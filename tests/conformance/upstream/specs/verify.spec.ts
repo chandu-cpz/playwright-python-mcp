@@ -109,7 +109,7 @@ test('browser_verify_element_visible (iframe)', async ({ client, server }) => {
     },
   })).toHaveResponse({
     result: 'Done',
-    code: `await expect(page.locator("iframe").locator("internal:control=enter-frame").get_by_role("heading", name="Inner iframe")).to_be_visible()`,
+    code: `await expect(page.locator("iframe").content_frame.get_by_role("heading", name="Inner iframe")).to_be_visible()`,
   });
 });
 
@@ -133,7 +133,7 @@ test('browser_verify_text_visible (iframe)', async ({ client, server }) => {
     },
   })).toHaveResponse({
     result: 'Done',
-    code: `await expect(page.locator("iframe").locator("internal:control=enter-frame").get_by_role("heading", name="Inner iframe")).to_be_visible()`,
+    code: `await expect(page.locator("iframe").content_frame.get_by_role("heading", name="Inner iframe")).to_be_visible()`,
   });
 });
 

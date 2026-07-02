@@ -8,7 +8,7 @@ from typing import Any
 @dataclass(slots=True)
 class ParsedSelectorPart:
     name: str
-    body: str
+    body: Any
     source: str
 
 
@@ -25,14 +25,20 @@ class ParsedAttributeSelector:
     attributes: list[ParsedAttribute]
 
 
+NESTED_SELECTOR_NAMES = {"internal:has", "internal:has-not", "internal:and", "internal:or", "internal:chain"}
+
+
 def parse_selector(selector: str) -> list[ParsedSelectorPart]:
-    """Port of upstream `parseSelectorString` for currently used MCP paths.
+    """Port of upstream selector parsing needed for locator codegen.
 
     Upstream source:
     - packages/isomorphic/selectorParser.ts
     - parseSelectorString
     """
-    return [_parse_selector_part(part) for part in _split_selector(selector)]
+    parts = [_parse_selector_part(part) for part in _split_selector(selector)]
+    if parts and parts[0].name in NESTED_SELECTOR_NAMES:
+        raise ValueError(f'"{parts[0].name}" selector cannot be first')
+    return parts
 
 
 def parse_attribute_selector(selector: str) -> ParsedAttributeSelector:
@@ -85,16 +91,32 @@ def _split_selector(selector: str) -> list[str]:
 
 def _parse_selector_part(part: str) -> ParsedSelectorPart:
     equal_index = part.find("=")
+    body: Any
     if equal_index != -1 and _is_valid_engine_name(part[:equal_index].strip()):
         name = part[:equal_index].strip()
         body = part[equal_index + 1 :]
+    elif len(part) > 1 and part[0] in {"'", '"'} and part[-1] == part[0]:
+        name = "text"
+        body = part
     elif _is_xpath_body(part):
         name = "xpath"
         body = part
     else:
         name = "css"
         body = part
-    return ParsedSelectorPart(name=name, body=body, source=body)
+    source = str(body)
+    if name in NESTED_SELECTOR_NAMES:
+        try:
+            unescaped = json.loads(f"[{body}]")
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Malformed selector: {name}={body}") from exc
+        if not isinstance(unescaped, list) or not unescaped or len(unescaped) > 2 or not isinstance(unescaped[0], str):
+            raise ValueError(f"Malformed selector: {name}={body}")
+        nested_body: dict[str, Any] = {"parsed": parse_selector(unescaped[0])}
+        if len(unescaped) == 2:
+            nested_body["distance"] = unescaped[1]
+        body = nested_body
+    return ParsedSelectorPart(name=name, body=body, source=source)
 
 
 def _read_bracket_content(selector: str, start: int) -> tuple[str, int]:
@@ -125,23 +147,29 @@ def _parse_attribute_content(content: str) -> ParsedAttribute:
     name = content[:equal_index]
     raw_value = content[equal_index + 1 :]
     case_sensitive = False
-    if raw_value.endswith(("i", "s")) and raw_value[:-1]:
+    if raw_value.startswith("/") and raw_value.count("/") >= 2:
+        last_slash = raw_value.rfind("/")
+        value: Any = {"regex": raw_value[1:last_slash], "flags": raw_value[last_slash + 1 :]}
+    elif raw_value.endswith(("i", "s")) and raw_value[:-1]:
         case_sensitive = raw_value[-1] == "s"
-        raw_value = raw_value[:-1]
-
-    if raw_value.startswith('"'):
-        value: Any = json.loads(raw_value)
-    elif raw_value == "true":
-        value = True
-    elif raw_value == "false":
-        value = False
+        value = _parse_plain_attribute_value(raw_value[:-1])
     else:
-        try:
-            value = int(raw_value)
-        except ValueError:
-            value = raw_value
+        value = _parse_plain_attribute_value(raw_value)
 
     return ParsedAttribute(name=name, value=value, case_sensitive=case_sensitive)
+
+
+def _parse_plain_attribute_value(raw_value: str) -> Any:
+    if raw_value.startswith('"'):
+        return json.loads(raw_value)
+    if raw_value == "true":
+        return True
+    if raw_value == "false":
+        return False
+    try:
+        return int(raw_value)
+    except ValueError:
+        return raw_value
 
 
 def _is_valid_engine_name(value: str) -> bool:
