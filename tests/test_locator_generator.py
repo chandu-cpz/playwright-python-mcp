@@ -1,5 +1,5 @@
 from playwright_python_mcp.backend.codegen import python_invocation
-from playwright_python_mcp.backend.locator_generator import as_python_locator, as_python_locators
+from playwright_python_mcp.backend.locator_generator import as_python_locator, as_python_locator_description, as_python_locators
 
 
 def test_generates_python_role_locator() -> None:
@@ -56,3 +56,20 @@ def test_generates_python_visible_and_regex_locators() -> None:
     assert as_python_locator("css=div >> visible=true") == 'locator("div").filter(visible=True)'
     assert as_python_locator("internal:text=/foo/i") == 'get_by_text(re.compile(r"foo", re.IGNORECASE))'
     assert as_python_locator("internal:role=button[name=/save/i]") == 'get_by_role("button", name=re.compile(r"save", re.IGNORECASE))'
+
+
+def test_python_locator_description_defaults_to_locator() -> None:
+    assert as_python_locator_description('internal:role=button[name="Submit"i]') == 'get_by_role("button", name="Submit")'
+
+
+def test_python_locator_description_uses_internal_describe() -> None:
+    selector = 'internal:role=button[name="Submit"i] >> internal:describe="Primary submit button"'
+
+    assert as_python_locator_description(selector) == "Primary submit button"
+    assert as_python_locator(selector) == 'get_by_role("button", name="Submit")'
+
+
+def test_python_locator_description_tolerates_invalid_selector() -> None:
+    selector = 'internal:describe="unterminated'
+
+    assert as_python_locator_description(selector) == selector

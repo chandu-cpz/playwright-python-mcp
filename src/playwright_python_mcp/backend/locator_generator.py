@@ -19,12 +19,34 @@ def as_python_locator(selector: str) -> str:
     return as_python_locators(selector, max_output_size=1)[0]
 
 
+def as_python_locator_description(selector: str) -> str:
+    """Port of upstream `asLocatorDescription('python', selector)`."""
+    try:
+        parts = parse_selector(selector)
+        description = _parse_custom_description(parts)
+        if description is not None:
+            return description
+        return _inner_as_locators(parts, max_output_size=1)[0]
+    except (ValueError, json.JSONDecodeError):
+        return selector
+
+
 def as_python_locators(selector: str, *, max_output_size: int = 20) -> list[str]:
     try:
         parts = parse_selector(selector)
         return _inner_as_locators(parts, max_output_size=max_output_size)
     except (ValueError, json.JSONDecodeError):
         return [_default_locator(selector)]
+
+
+def _parse_custom_description(parts: list[ParsedSelectorPart]) -> str | None:
+    if not parts:
+        return None
+    last = parts[-1]
+    if last.name != "internal:describe":
+        return None
+    description = json.loads(str(last.body))
+    return description if isinstance(description, str) else None
 
 
 def _inner_as_locators(parts: list[ParsedSelectorPart], *, is_frame_locator: bool = False, max_output_size: int = 20) -> list[str]:
@@ -36,6 +58,9 @@ def _inner_as_locators(parts: list[ParsedSelectorPart], *, is_frame_locator: boo
         base = next_base
         next_base = "locator"
 
+        if part.name == "internal:describe":
+            index += 1
+            continue
         if part.name == "nth":
             if part.body == "0":
                 tokens.append([_generate_locator(base, "first", ""), _generate_locator(base, "nth", "0")])
