@@ -307,6 +307,7 @@ class Tab:
         depth: int | None = None,
         boxes: bool | None = None,
         relative_to: Path | None = None,
+        include_aria: bool = True,
     ) -> TabSnapshot:
         if self._modal_states:
             return TabSnapshot(
@@ -315,8 +316,10 @@ class Tab:
                 events=self._recent_event_entries,
                 console_link=await self._console_log.take(relative_to=relative_to),
             )
-        locator = await self.snapshot_locator(target)
-        aria_snapshot = await locator.aria_snapshot(mode="ai", depth=depth, boxes=boxes)
+        aria_snapshot = ""
+        if include_aria:
+            locator = await self.snapshot_locator(target)
+            aria_snapshot = await locator.aria_snapshot(mode="ai", depth=depth, boxes=boxes)
         snapshot = TabSnapshot(
             aria_snapshot=aria_snapshot,
             modal_states=list(self._modal_states),
@@ -370,6 +373,8 @@ class Tab:
             normalized = await locator.normalize()
             return ResolvedTarget(
                 locator=locator,
+                # Uses private _impl_obj because Playwright Python does not expose a
+                # public `selector` property on normalized locators yet.
                 code=as_python_locator(normalized._impl_obj._selector),
             )
         except Exception as exc:

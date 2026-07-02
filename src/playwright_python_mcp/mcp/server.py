@@ -8,6 +8,7 @@ from urllib.parse import unquote, urlparse
 
 from fastmcp import FastMCP
 from fastmcp.server.context import Context as FastMCPContext
+from mcp.types import ToolAnnotations
 from starlette.middleware import Middleware
 from starlette.responses import PlainTextResponse
 
@@ -52,7 +53,17 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
         handler.__annotations__ = {parameter.name: parameter.annotation for parameter in tool.parameters}
         handler.__annotations__["ctx"] = FastMCPContext
         handler.__annotations__["return"] = Any
-        app.tool(name=tool.name)(handler)
+        app.tool(
+            name=tool.name,
+            title=tool.title or _title_from_name(tool.name),
+            description=tool.description or tool.name,
+            annotations=ToolAnnotations(
+                readOnlyHint=tool.tool_type == "readOnly",
+                destructiveHint=False if tool.tool_type == "readOnly" else None,
+                openWorldHint=True,
+            ),
+            run_in_thread=False,
+        )(handler)
 
     return PlaywrightMCPServer(app=app, config=config)
 
@@ -86,6 +97,10 @@ def _make_fastmcp_handler(backend: BrowserBackend, tool_name: str):
         return await backend.call_tool(tool_name, kwargs, roots=roots)
 
     return handler
+
+
+def _title_from_name(name: str) -> str:
+    return name.removeprefix("browser_").replace("_", " ").title()
 
 
 async def _tool_handler(**_kwargs: Any):

@@ -93,7 +93,9 @@ def filtered_tools(config: ServerConfig) -> list[Tool]:
     result = [
         tool
         for tool in IMPLEMENTED_TOOLS
-        if tool.name in visible_names and not tool.skill_only and (tool.capability.startswith("core") or tool.capability in (config.caps or []))
+        if tool.name in visible_names
+        and not tool.skill_only
+        and (tool.capability.startswith("core") or tool.capability in (config.caps or []))
     ]
     result.extend(
         Tool(name=name, capability="placeholder", handler=_placeholder_handler(name))

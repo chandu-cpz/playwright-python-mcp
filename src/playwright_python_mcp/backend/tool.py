@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from inspect import Parameter, Signature
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from .context import Context
@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 
 
 ToolHandler = Callable[["Context", dict[str, Any], "Response"], Awaitable[None]]
+ToolType = Literal["action", "readOnly"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +27,9 @@ class Tool:
     capability: str
     handler: ToolHandler
     parameters: tuple[ToolParameter, ...] = ()
+    title: str | None = None
+    description: str | None = None
+    tool_type: ToolType = "action"
     skill_only: bool = False
     clears_modal_state: str | None = None
 

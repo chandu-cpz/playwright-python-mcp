@@ -134,6 +134,7 @@ class Response:
                 depth=request.depth if request else None,
                 boxes=request.boxes if request else None,
                 relative_to=self._client_workspace,
+                include_aria=self._snapshot_request is not None,
             )
             tab_headers = [await current.header_snapshot() for current in self._context.tabs()]
             if self._snapshot_request is not None or any(header.changed for header in tab_headers):

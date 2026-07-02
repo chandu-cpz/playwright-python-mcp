@@ -20,6 +20,8 @@ async def _handle_verify_element_visible(context: Context, params: dict[str, Any
         locator = frame.get_by_role(role, name=accessible_name)
         if await locator.count() > 0:
             resolved = await locator.normalize()
+            # Uses private _impl_obj because Playwright Python does not expose a
+            # public `selector` property on normalized locators yet.
             response.add_code(f"await expect(page.{as_python_locator(resolved._impl_obj._selector)}).to_be_visible()")
             response.add_text_result("Done")
             return
@@ -33,6 +35,8 @@ async def _handle_verify_text_visible(context: Context, params: dict[str, Any], 
         locator = frame.get_by_text(text).filter(visible=True)
         if await locator.count() > 0:
             resolved = await locator.normalize()
+            # Uses private _impl_obj because Playwright Python does not expose a
+            # public `selector` property on normalized locators yet.
             response.add_code(f"await expect(page.{as_python_locator(resolved._impl_obj._selector)}).to_be_visible()")
             response.add_text_result("Done")
             return

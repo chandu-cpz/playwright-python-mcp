@@ -129,6 +129,11 @@ class BrowserBackend:
             )
             return self._browser
         if self._config.extension:
+            if self._config.browser_name != "chromium":
+                raise ValueError(
+                    f'Extension mode (--extension) is only supported with Chromium-based browsers, '
+                    f'got "{self._config.browser_name}".'
+                )
             self._extension_relay = CDPRelayServer(
                 self._playwright,
                 browser_channel=self._config.browser_channel or self._config.browser,
