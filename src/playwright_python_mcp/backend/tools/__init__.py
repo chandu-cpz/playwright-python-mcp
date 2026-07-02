@@ -93,7 +93,6 @@ DEVTOOLS_TOOL_NAMES = [
     "browser_resume",
     "browser_highlight",
     "browser_hide_highlight",
-    "browser_annotate",
     "browser_start_video",
     "browser_stop_video",
     "browser_video_chapter",

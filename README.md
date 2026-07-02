@@ -110,6 +110,10 @@ npx playwright test --workers=10
 
 The conformance specs are copied from upstream Playwright MCP where practical and adapted only for this Python-native port's intentional snippet syntax divergence or fixture limitations.
 
+## Known Limitations
+
+- `browser_annotate` is intentionally not exposed. Upstream implements it through the Node.js Playwright Dashboard daemon, and this port does not ship that daemon. A Python-native equivalent may be added later if the dashboard workflow is ported.
+
 ## Dependency Policy
 
 - Python: `>=3.12`

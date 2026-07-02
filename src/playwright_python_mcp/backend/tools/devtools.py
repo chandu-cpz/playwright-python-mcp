@@ -67,12 +67,6 @@ async def _handle_hide_highlight(context: Context, params: dict[str, Any], respo
         response.add_text_result("Hid page highlight")
 
 
-async def _handle_annotate(_context: Context, _params: dict[str, Any], _response: Response) -> None:
-    raise ValueError(
-        "browser_annotate depends on the upstream Playwright dashboard daemon and is not implemented in this Python port yet."
-    )
-
-
 def _parse_location(value: str) -> tuple[str, int | None]:
     if ":" not in value:
         return value, None
@@ -112,5 +106,4 @@ devtools_tools = [
         parameters=(param("target", str | None, None), param("element", str | None, None)),
         handler=_handle_hide_highlight,
     ),
-    Tool(name="browser_annotate", capability="devtools", tool_type="readOnly", handler=_handle_annotate),
 ]
