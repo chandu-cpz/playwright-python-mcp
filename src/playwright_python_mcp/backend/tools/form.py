@@ -37,6 +37,7 @@ form_tools = [
     Tool(
         name="browser_fill_form",
         capability="core",
+        tool_type="input",
         parameters=(param("fields", list[FormField]),),
         handler=_handle_fill_form,
     )

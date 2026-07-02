@@ -199,10 +199,37 @@ class Tab:
         if self._modal_states:
             return
         self._modal_event = asyncio.Event()
+        requests: list[Request] = []
+
+        def request_listener(request: Request) -> None:
+            requests.append(request)
 
         async def action_and_settle():
-            result = await action()
-            await asyncio.sleep(0.5)
+            self.page.on("request", request_listener)
+            try:
+                result = await action()
+                await asyncio.sleep(0.5)
+            finally:
+                self.page.remove_listener("request", request_listener)
+
+            if any(request.is_navigation_request() for request in requests):
+                try:
+                    await self.page.main_frame.wait_for_load_state("load", timeout=10000)
+                except Error:
+                    pass
+                return result
+
+            response_tasks = [
+                asyncio.create_task(_wait_for_request_response(request))
+                for request in requests
+            ]
+            if response_tasks:
+                done, pending = await asyncio.wait(response_tasks, timeout=5)
+                for task in pending:
+                    task.cancel()
+                for task in done:
+                    task.exception()
+                await asyncio.sleep(0.5)
             return result
 
         action_task = asyncio.create_task(action_and_settle())
@@ -539,3 +566,12 @@ def _should_include_console_message(level: str, message_type: str) -> bool:
     }
     threshold = severity.get(level, severity["info"])
     return severity.get(message_type, severity["info"]) >= threshold
+
+
+async def _wait_for_request_response(request: Request) -> None:
+    try:
+        response = await request.response()
+        if response is not None and request.resource_type in {"document", "stylesheet", "script", "xhr", "fetch"}:
+            await response.finished()
+    except Error:
+        return

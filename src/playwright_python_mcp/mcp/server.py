@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import signal
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import wraps
 from importlib.metadata import PackageNotFoundError, version
 from inspect import Parameter, Signature
@@ -13,6 +13,7 @@ from fastmcp import FastMCP
 from fastmcp.server.context import Context as FastMCPContext
 from mcp.types import ToolAnnotations
 from starlette.middleware import Middleware
+from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
 from playwright_python_mcp.backend import BrowserBackend
@@ -25,6 +26,11 @@ class PlaywrightMCPServer:
     app: FastMCP
     config: ServerConfig
     backend: BrowserBackend
+    _cancel_scope: anyio.CancelScope | None = field(default=None, init=False)
+
+    def trigger_shutdown(self) -> None:
+        if self._cancel_scope is not None:
+            self._cancel_scope.cancel()
 
     def run(self) -> None:
         anyio.run(self.run_async)
@@ -54,6 +60,7 @@ class PlaywrightMCPServer:
                     return
 
         with anyio.CancelScope() as scope:
+            self._cancel_scope = scope
             async with anyio.create_task_group() as task_group:
                 task_group.start_soon(watch_signals, scope)
                 try:
@@ -92,7 +99,18 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
             run_in_thread=False,
         )(handler)
 
-    return PlaywrightMCPServer(app=app, config=config, backend=backend)
+    server = PlaywrightMCPServer(app=app, config=config, backend=backend)
+    _register_kill_endpoint(app, server)
+    return server
+
+
+def _register_kill_endpoint(app: FastMCP, server: PlaywrightMCPServer) -> None:
+    @app.custom_route("/killkillkill", methods=["POST"])  # type: ignore[arg-type]
+    async def _handle_kill(request: Request) -> PlainTextResponse:
+        if request.headers.get("x-pw-mcp-kill") == "1":
+            server.trigger_shutdown()
+            return PlainTextResponse("ok", status_code=200)
+        return PlainTextResponse("missing x-pw-mcp-kill header", status_code=400)
 
 
 class HostAllowlistMiddleware:

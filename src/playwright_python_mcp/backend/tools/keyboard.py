@@ -64,12 +64,14 @@ keyboard_tools = [
     Tool(
         name="browser_press_key",
         capability="core-input",
+        tool_type="input",
         parameters=(param("key", str),),
         handler=_handle_press_key,
     ),
     Tool(
         name="browser_type",
         capability="core-input",
+        tool_type="input",
         parameters=(
             param("target", str),
             param("text", str),
@@ -82,6 +84,7 @@ keyboard_tools = [
     Tool(
         name="browser_press_sequentially",
         capability="core-input",
+        tool_type="input",
         parameters=(param("text", str), param("submit", bool, False)),
         handler=_handle_press_sequentially,
         skill_only=True,
@@ -89,6 +92,7 @@ keyboard_tools = [
     Tool(
         name="browser_keydown",
         capability="core-input",
+        tool_type="input",
         parameters=(param("key", str),),
         handler=_handle_keydown,
         skill_only=True,
@@ -96,6 +100,7 @@ keyboard_tools = [
     Tool(
         name="browser_keyup",
         capability="core-input",
+        tool_type="input",
         parameters=(param("key", str),),
         handler=_handle_keyup,
         skill_only=True,

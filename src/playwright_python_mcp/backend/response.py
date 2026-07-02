@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from fastmcp.tools.base import ToolResult
 from mcp.types import ImageContent, TextContent
+from PIL import Image
 
 if TYPE_CHECKING:
     from .context import Context
@@ -193,10 +195,17 @@ class Response:
     def _image_content(self) -> list[ImageContent]:
         import base64
 
-        return [
-            ImageContent(type="image", data=base64.b64encode(data).decode("ascii"), mimeType=f"image/{image_type}")
-            for data, image_type in self._image_results
-        ]
+        content: list[ImageContent] = []
+        for data, image_type in self._image_results:
+            scaled_data = scale_image_to_fit_message(data, image_type)
+            content.append(
+                ImageContent(
+                    type="image",
+                    data=base64.b64encode(scaled_data).decode("ascii"),
+                    mimeType=f"image/{image_type}",
+                )
+            )
+        return content
 
     def _serialize_sections(self, sections: list[tuple[str, list[str], str | None, bool]]) -> str:
         rendered: list[str] = []
@@ -330,6 +339,23 @@ def _result_meta(is_close: bool) -> dict[str, object] | None:
     if not is_close:
         return None
     return {"isClose": True}
+
+
+def scale_image_to_fit_message(data: bytes, image_type: str) -> bytes:
+    with Image.open(BytesIO(data)) as image:
+        width, height = image.size
+        pixels = width * height
+        shrink = min(1568 / width, 1568 / height, (1.15 * 1024 * 1024 / pixels) ** 0.5)
+        if shrink > 1:
+            return data
+        scaled_size = (max(1, int(width * shrink)), max(1, int(height * shrink)))
+        scaled = image.resize(scaled_size, Image.Resampling.LANCZOS)
+        output = BytesIO()
+        if image_type == "png":
+            scaled.save(output, format="PNG")
+        else:
+            scaled.convert("RGB").save(output, format="JPEG", quality=80)
+        return output.getvalue()
 
 
 def _field(value: object, name: str) -> object | None:

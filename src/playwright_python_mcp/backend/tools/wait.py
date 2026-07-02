@@ -37,6 +37,7 @@ wait_tools = [
     Tool(
         name="browser_wait_for",
         capability="core",
+        tool_type="assertion",
         parameters=(
             param("time", int | float | None, None),
             param("text", str | None, None),

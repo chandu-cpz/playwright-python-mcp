@@ -302,6 +302,9 @@ def _validate_and_complete(config: dict[str, Any]) -> None:
         launch_options["headless"] = os.name == "posix" and not os.environ.get("DISPLAY")
     if context_options.get("viewport") is None:
         context_options["viewport"] = {"width": 1280, "height": 720} if launch_options.get("headless") else None
+    console = config.setdefault("console", {})
+    if console.get("level") not in {None, "error", "warning", "info", "debug"}:
+        raise ValueError('console.level must be one of "error", "warning", "info", "debug"')
 
 
 def _server_config_from_merged(config: dict[str, Any]) -> ServerConfig:

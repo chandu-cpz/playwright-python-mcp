@@ -131,3 +131,20 @@ def test_isolated_rejects_user_data_dir(tmp_path: Path) -> None:
         assert "userDataDir is not supported in isolated mode" in str(exc)
     else:
         raise AssertionError("Expected isolated user data dir validation error")
+
+
+def test_console_level_validation() -> None:
+    try:
+        load_config(
+            browser=None,
+            caps="config",
+            config_path=None,
+            headless=True,
+            test_id_attribute="data-testid",
+            vision=False,
+            console_level="verbose",
+        )
+    except ValueError as exc:
+        assert "console.level must be one of" in str(exc)
+    else:
+        raise AssertionError("Expected console level validation error")

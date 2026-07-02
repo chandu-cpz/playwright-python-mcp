@@ -136,6 +136,44 @@ def test_tracing_capability_alias_exposes_devtools_tools() -> None:
     assert "browser_resume" in names
 
 
+def test_tool_types_match_upstream_families() -> None:
+    config = load_config(
+        browser=None,
+        caps="vision,testing",
+        config_path=None,
+        headless=True,
+        test_id_attribute="data-testid",
+        vision=False,
+    )
+    tools = {tool.name: tool for tool in filtered_tools(config)}
+
+    for name in {
+        "browser_click",
+        "browser_select_option",
+        "browser_hover",
+        "browser_drag",
+        "browser_fill_form",
+        "browser_press_key",
+        "browser_type",
+        "browser_mouse_move_xy",
+        "browser_mouse_click_xy",
+        "browser_mouse_down",
+        "browser_mouse_up",
+        "browser_mouse_wheel",
+        "browser_mouse_drag_xy",
+    }:
+        assert tools[name].tool_type == "input", name
+
+    for name in {
+        "browser_verify_element_visible",
+        "browser_verify_text_visible",
+        "browser_verify_list_visible",
+        "browser_verify_value",
+        "browser_wait_for",
+    }:
+        assert tools[name].tool_type == "assertion", name
+
+
 def test_response_does_not_capture_aria_snapshot_without_request(tmp_path) -> None:
     async def run() -> None:
         tab = FakeTab()
@@ -287,3 +325,23 @@ class FakeBrowserContext:
 class FakeDebugger:
     def __init__(self) -> None:
         self.paused_details: Any = None
+
+
+def test_killkillkill_endpoint_is_registered_on_http_app() -> None:
+    server = create_server(_config())
+    http = server.app.http_app()
+    kill_routes = [route for route in http.routes if getattr(route, "path", "") == "/killkillkill"]
+    assert len(kill_routes) == 1
+
+
+def test_trigger_shutdown_cancels_active_scope() -> None:
+    import anyio
+
+    async def run() -> None:
+        server = create_server(_config())
+        with anyio.CancelScope() as scope:
+            server._cancel_scope = scope
+            server.trigger_shutdown()
+            assert scope.cancel_called is True
+
+    anyio.run(run)

@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 
 ToolHandler = Callable[["Context", dict[str, Any], "Response"], Awaitable[None]]
-ToolType = Literal["action", "readOnly"]
+ToolType = Literal["input", "assertion", "action", "readOnly"]
 
 
 @dataclass(frozen=True, slots=True)

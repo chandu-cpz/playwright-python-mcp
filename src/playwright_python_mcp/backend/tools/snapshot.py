@@ -97,6 +97,7 @@ snapshot_tools = [
     Tool(
         name="browser_click",
         capability="core",
+        tool_type="input",
         parameters=(
             param("target", str),
             param("element", str | None, None),
@@ -109,6 +110,7 @@ snapshot_tools = [
     Tool(
         name="browser_select_option",
         capability="core",
+        tool_type="input",
         parameters=(
             param("target", str),
             param("values", list[str]),
@@ -119,12 +121,14 @@ snapshot_tools = [
     Tool(
         name="browser_hover",
         capability="core",
+        tool_type="input",
         parameters=(param("target", str), param("element", str | None, None)),
         handler=_handle_hover,
     ),
     Tool(
         name="browser_drag",
         capability="core",
+        tool_type="input",
         parameters=(
             param("startTarget", str),
             param("endTarget", str),
@@ -143,6 +147,7 @@ snapshot_tools = [
     Tool(
         name="browser_check",
         capability="core-input",
+        tool_type="input",
         parameters=(param("target", str), param("element", str | None, None)),
         handler=_handle_check,
         skill_only=True,
@@ -150,6 +155,7 @@ snapshot_tools = [
     Tool(
         name="browser_uncheck",
         capability="core-input",
+        tool_type="input",
         parameters=(param("target", str), param("element", str | None, None)),
         handler=_handle_uncheck,
         skill_only=True,

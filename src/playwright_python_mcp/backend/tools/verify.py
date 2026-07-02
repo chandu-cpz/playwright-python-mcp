@@ -84,24 +84,28 @@ verify_tools = [
     Tool(
         name="browser_verify_element_visible",
         capability="testing",
+        tool_type="assertion",
         parameters=(param("role", str), param("accessibleName", str)),
         handler=_handle_verify_element_visible,
     ),
     Tool(
         name="browser_verify_text_visible",
         capability="testing",
+        tool_type="assertion",
         parameters=(param("text", str),),
         handler=_handle_verify_text_visible,
     ),
     Tool(
         name="browser_verify_list_visible",
         capability="testing",
+        tool_type="assertion",
         parameters=(param("element", str), param("target", str), param("items", list[str])),
         handler=_handle_verify_list_visible,
     ),
     Tool(
         name="browser_verify_value",
         capability="testing",
+        tool_type="assertion",
         parameters=(
             param("type", VerifyValueType),
             param("element", str),

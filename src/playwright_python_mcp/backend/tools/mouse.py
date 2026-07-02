@@ -102,12 +102,14 @@ mouse_tools = [
     Tool(
         name="browser_mouse_move_xy",
         capability="vision",
+        tool_type="input",
         parameters=(param("x", Number), param("y", Number)),
         handler=_handle_mouse_move_xy,
     ),
     Tool(
         name="browser_mouse_click_xy",
         capability="vision",
+        tool_type="input",
         parameters=(
             param("x", Number),
             param("y", Number),
@@ -120,24 +122,28 @@ mouse_tools = [
     Tool(
         name="browser_mouse_down",
         capability="vision",
+        tool_type="input",
         parameters=(param("button", Button | None, None),),
         handler=_handle_mouse_down,
     ),
     Tool(
         name="browser_mouse_up",
         capability="vision",
+        tool_type="input",
         parameters=(param("button", Button | None, None),),
         handler=_handle_mouse_up,
     ),
     Tool(
         name="browser_mouse_wheel",
         capability="vision",
+        tool_type="input",
         parameters=(param("deltaX", Number, 0), param("deltaY", Number, 0)),
         handler=_handle_mouse_wheel,
     ),
     Tool(
         name="browser_mouse_drag_xy",
         capability="vision",
+        tool_type="input",
         parameters=(
             param("startX", Number),
             param("startY", Number),

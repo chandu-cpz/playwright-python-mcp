@@ -243,6 +243,7 @@ The tag publish workflow runs both the Python gates and the adapted upstream con
 - `browser_annotate` is intentionally not exposed. Upstream implements it through the Node.js Playwright Dashboard daemon; this port does not ship that daemon. A Python-native equivalent may be added later if the dashboard workflow is ported.
 - `browser.initPage` / `--init-page` is parsed for config compatibility but not executed. Upstream loads a JavaScript module and calls its default export against each new page; this Python package does not execute Node.js init-page modules.
 - HTTP transport currently uses one backend instance for the server process. This gives shared browser state, but it is not yet the full upstream per-client backend factory model.
+- HTTP transport does not yet implement upstream's periodic MCP heartbeat ping or `/killkillkill` shutdown endpoint. Stdio transport has signal cleanup.
 - A small number of conformance tests are explicitly skipped for fixture or environment gaps, including bound-browser debugger closure, remote endpoint storage-state coverage, CDP first-tab reuse coverage, and record-video coverage.
 
 ## Security
