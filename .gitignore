@@ -2,6 +2,8 @@ AGENTS.md
 plan.md
 rules.md
 .mimocode/
+.playwright-mcp/
+.zapply/
 /upstream/
 .venv/
 node_modules/

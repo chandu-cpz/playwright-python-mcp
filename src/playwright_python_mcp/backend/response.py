@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from fastmcp.tools.base import ToolResult
 from mcp.types import ImageContent, TextContent
@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 @dataclass(slots=True)
 class SnapshotRequest:
+    mode: Literal["none", "full", "explicit"]
     target: str | None = None
     depth: int | None = None
     boxes: bool | None = None
@@ -96,7 +97,7 @@ class Response:
         self._code.append(code)
 
     def set_include_snapshot(self) -> None:
-        self._snapshot_request = SnapshotRequest()
+        self._snapshot_request = SnapshotRequest(mode=_snapshot_mode(self._context.config.snapshot_mode))
 
     def set_include_full_snapshot(
         self,
@@ -106,7 +107,13 @@ class Response:
         boxes: bool | None = None,
         file_name: str | None = None,
     ) -> None:
-        self._snapshot_request = SnapshotRequest(target=target, depth=depth, boxes=boxes, file_name=file_name)
+        self._snapshot_request = SnapshotRequest(
+            mode="explicit",
+            target=target,
+            depth=depth,
+            boxes=boxes,
+            file_name=file_name,
+        )
 
     def set_close(self) -> None:
         self._is_close = True
@@ -134,10 +141,14 @@ class Response:
                 depth=request.depth if request else None,
                 boxes=request.boxes if request else None,
                 relative_to=self._client_workspace,
-                include_aria=self._snapshot_request is not None,
+                include_aria=self._snapshot_request is not None and self._snapshot_request.mode != "none",
             )
             tab_headers = [await current.header_snapshot() for current in self._context.tabs()]
-            if self._snapshot_request is not None or any(header.changed for header in tab_headers):
+            if (
+                self._snapshot_request is not None
+                and self._snapshot_request.mode != "none"
+                or any(header.changed for header in tab_headers)
+            ):
                 if len(tab_headers) != 1:
                     sections.append(("Open tabs", render_tabs_markdown(tab_headers), None, False))
                 current_header = next((header for header in tab_headers if header.current), tab_headers[0])
@@ -146,8 +157,8 @@ class Response:
         if tab_snapshot is not None and tab_snapshot.modal_states:
             sections.append(("Modal state", render_modal_states(tab_snapshot.modal_states), None, False))
 
-        if tab_snapshot is not None and self._snapshot_request is not None:
-            if self._snapshot_request.file_name is not None or self._context.config.snapshot_mode == "full":
+        if tab_snapshot is not None and self._snapshot_request is not None and self._snapshot_request.mode != "none":
+            if self._snapshot_request.mode != "explicit" or self._snapshot_request.file_name is not None:
                 from .context import FilenameTemplate
 
                 suggested_filename = self._snapshot_request.file_name
@@ -293,3 +304,7 @@ def _result_meta(is_close: bool) -> dict[str, object] | None:
     if not is_close:
         return None
     return {"isClose": True}
+
+
+def _snapshot_mode(value: str) -> Literal["none", "full"]:
+    return "none" if value == "none" else "full"

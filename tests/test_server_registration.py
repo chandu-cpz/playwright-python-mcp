@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -67,24 +68,76 @@ def test_response_does_not_capture_aria_snapshot_without_request(tmp_path) -> No
     asyncio.run(run())
 
 
+def test_explicit_snapshot_is_inline_by_default(tmp_path: Path) -> None:
+    async def run() -> None:
+        tab = FakeTab(aria_snapshot='- button "Submit" [ref=e1]')
+        context = FakeContext(tab, tmp_path, snapshot_mode="full")
+        response = Response(cast(Context, context), tool_name="browser_snapshot", tool_args={})
+        response.set_include_full_snapshot()
+
+        result = await response.serialize()
+
+        assert isinstance(result, str)
+        assert "```yaml" in result
+        assert '- button "Submit" [ref=e1]' in result
+        assert "[Snapshot](" not in result
+        assert tab.capture_kwargs and tab.capture_kwargs["include_aria"] is True
+
+    asyncio.run(run())
+
+
+def test_action_snapshot_uses_file_for_full_mode(tmp_path: Path) -> None:
+    async def run() -> None:
+        tab = FakeTab(aria_snapshot='- button "Submit" [ref=e1]')
+        context = FakeContext(tab, tmp_path, snapshot_mode="full")
+        response = Response(cast(Context, context), tool_name="browser_click", tool_args={})
+        response.set_include_snapshot()
+
+        result = await response.serialize()
+
+        assert isinstance(result, str)
+        assert "[Snapshot](" in result
+        assert "```yaml" not in result
+        assert (tmp_path / "page.yml").read_text(encoding="utf-8") == '- button "Submit" [ref=e1]'
+
+    asyncio.run(run())
+
+
+def test_action_snapshot_respects_none_mode(tmp_path: Path) -> None:
+    async def run() -> None:
+        tab = FakeTab(aria_snapshot='- button "Submit" [ref=e1]')
+        context = FakeContext(tab, tmp_path, snapshot_mode="none")
+        response = Response(cast(Context, context), tool_name="browser_click", tool_args={})
+        response.set_include_snapshot()
+
+        result = await response.serialize()
+
+        assert isinstance(result, str)
+        assert "### Snapshot" not in result
+        assert tab.capture_kwargs and tab.capture_kwargs["include_aria"] is False
+
+    asyncio.run(run())
+
+
 class FakeTab:
-    def __init__(self) -> None:
+    def __init__(self, aria_snapshot: str = "") -> None:
         self.capture_kwargs: dict[str, Any] | None = None
+        self._aria_snapshot = aria_snapshot
 
     async def capture_tab_snapshot(self, **kwargs: Any) -> TabSnapshot:
         self.capture_kwargs = kwargs
-        return TabSnapshot(aria_snapshot="")
+        return TabSnapshot(aria_snapshot=self._aria_snapshot)
 
     async def header_snapshot(self) -> TabHeader:
         return TabHeader(title="title", url="about:blank", current=True, crashed=False, console={"total": 0, "errors": 0, "warnings": 0})
 
 
 class FakeContext:
-    def __init__(self, tab: FakeTab, cwd) -> None:
+    def __init__(self, tab: FakeTab, cwd: Path, *, snapshot_mode: str = "none") -> None:
         self.cwd = cwd
         self.config = SimpleNamespace(
             codegen="python",
-            snapshot_mode="none",
+            snapshot_mode=snapshot_mode,
             image_responses="omit",
             output_max_size=None,
         )
@@ -98,3 +151,6 @@ class FakeContext:
 
     def redact_secrets(self, text: str) -> str:
         return text
+
+    async def output_file(self, template: Any, origin: str) -> Path:
+        return self.cwd / f"{template.prefix}.{template.ext}"
