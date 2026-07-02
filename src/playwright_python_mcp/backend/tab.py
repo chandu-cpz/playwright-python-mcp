@@ -194,23 +194,25 @@ class Tab:
 
         await self.wait_for_completion(action)
 
-    async def wait_for_completion(self, action) -> None:
+    async def wait_for_completion(self, action):
         if self._modal_states:
             return
         self._modal_event = asyncio.Event()
 
-        async def action_and_settle() -> None:
-            await action()
+        async def action_and_settle():
+            result = await action()
             await asyncio.sleep(0.5)
+            return result
 
         action_task = asyncio.create_task(action_and_settle())
         modal_task = asyncio.create_task(self._modal_event.wait())
         done, pending = await asyncio.wait({action_task, modal_task}, return_when=asyncio.FIRST_COMPLETED)
         if action_task in done:
             modal_task.cancel()
-            await action_task
+            return await action_task
         else:
             action_task.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
+            return None
 
     async def press_key(self, key: str) -> None:
         if key == "Enter":

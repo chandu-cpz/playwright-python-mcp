@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import textwrap
+from collections.abc import Callable
 from typing import Any
 
 from playwright_python_mcp.backend.context import Context
@@ -21,7 +23,7 @@ async def _handle_run_code_unsafe(context: Context, params: dict[str, Any], resp
 
     response.add_code(code)
     try:
-        result = await _execute_python_code(code, tab.page)
+        result = await tab.wait_for_completion(lambda: _execute_python_code(code, tab.page))
     except Exception as exc:
         response.add_error(str(exc))
         return
@@ -30,9 +32,39 @@ async def _handle_run_code_unsafe(context: Context, params: dict[str, Any], resp
 
 
 async def _execute_python_code(code: str, page: Any) -> Any:
-    namespace: dict[str, Any] = {"page": page}
+    end = asyncio.get_running_loop().create_future()
+    namespace: dict[str, Any] = {
+        "__builtins__": _SAFE_BUILTINS,
+        "page": page,
+        "__end__": end,
+    }
+    loop = asyncio.get_running_loop()
+    previous_exception_handler = loop.get_exception_handler()
+
+    def exception_handler(_loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+        exception = context.get("exception")
+        if exception is None:
+            exception = RuntimeError(str(context.get("message", "Unhandled user-code exception")))
+        if not end.done():
+            end.set_exception(exception)
+        elif previous_exception_handler is not None:
+            previous_exception_handler(_loop, context)
+        else:
+            _loop.default_exception_handler(context)
+
+    loop.set_exception_handler(exception_handler)
+    try:
+        result = await _execute_in_namespace(code, page, namespace)
+        if not end.done():
+            end.set_result(result)
+        return await end
+    finally:
+        loop.set_exception_handler(previous_exception_handler)
+
+
+async def _execute_in_namespace(code: str, page: Any, namespace: dict[str, Any]) -> Any:
     if code.lstrip().startswith("async def "):
-        exec(code, namespace)  # noqa: S102 - this tool is explicitly unsafe.
+        exec(code, namespace, namespace)  # noqa: S102 - this tool is explicitly unsafe.
         fn = namespace.get("run") or namespace.get("__fn__")
         if fn is None:
             candidates = [value for value in namespace.values() if inspect.iscoroutinefunction(value)]
@@ -42,8 +74,28 @@ async def _execute_python_code(code: str, page: Any) -> Any:
         return await fn(page)
 
     function_source = "async def __mcp_run(page):\n" + textwrap.indent(code, "    ")
-    exec(function_source, namespace)  # noqa: S102 - this tool is explicitly unsafe.
+    exec(function_source, namespace, namespace)  # noqa: S102 - this tool is explicitly unsafe.
     return await namespace["__mcp_run"](page)
+
+
+_SAFE_BUILTINS: dict[str, Callable[..., Any] | type[BaseException] | type[object]] = {
+    "Exception": Exception,
+    "RuntimeError": RuntimeError,
+    "ValueError": ValueError,
+    "TypeError": TypeError,
+    "AssertionError": AssertionError,
+    "str": str,
+    "repr": repr,
+    "len": len,
+    "dict": dict,
+    "list": list,
+    "tuple": tuple,
+    "set": set,
+    "bool": bool,
+    "int": int,
+    "float": float,
+    "print": print,
+}
 
 
 run_code_tools = [

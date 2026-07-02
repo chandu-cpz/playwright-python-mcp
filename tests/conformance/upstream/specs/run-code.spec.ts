@@ -80,6 +80,26 @@ test('browser_run_code_unsafe no-require', async ({ client, server }) => {
     error: expect.stringContaining(`name 'require' is not defined`),
     isError: true,
   });
+
+  expect(await client.callTool({
+    name: 'browser_run_code_unsafe',
+    arguments: {
+      code: `import os`,
+    },
+  })).toHaveResponse({
+    error: expect.stringContaining(`__import__ not found`),
+    isError: true,
+  });
+
+  expect(await client.callTool({
+    name: 'browser_run_code_unsafe',
+    arguments: {
+      code: `open("/tmp/playwright-python-mcp-blocked", "w")`,
+    },
+  })).toHaveResponse({
+    error: expect.stringContaining(`name 'open' is not defined`),
+    isError: true,
+  });
 });
 
 test('browser_run_code_unsafe return value', async ({ client, server }) => {
