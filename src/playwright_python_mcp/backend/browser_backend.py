@@ -9,6 +9,7 @@ from playwright.async_api import Browser, BrowserContext as PlaywrightBrowserCon
 from playwright_python_mcp.mcp.config import ServerConfig
 
 from .context import Context
+from .extension_relay import CDPRelayServer
 from .response import Response
 from .tool import Tool
 
@@ -26,6 +27,7 @@ class BrowserBackend:
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._playwright_context: PlaywrightBrowserContext | None = None
+        self._extension_relay: CDPRelayServer | None = None
         self._context: Context | None = None
 
     def has_page(self) -> bool:
@@ -63,11 +65,14 @@ class BrowserBackend:
             await self._context.dispose()
         if self._browser is not None:
             await self._browser.close()
+        if self._extension_relay is not None:
+            await self._extension_relay.stop()
         if self._playwright is not None:
             await self._playwright.stop()
         self._playwright = None
         self._browser = None
         self._playwright_context = None
+        self._extension_relay = None
         self._context = None
 
     async def render_page_markdown(self) -> list[str]:
@@ -124,10 +129,19 @@ class BrowserBackend:
             )
             return self._browser
         if self._config.extension:
-            raise ValueError(
-                "--extension requires the upstream Playwright browser-extension CDP relay, "
-                "which is not ported yet. Use --cdp-endpoint or --endpoint for existing browser connections."
+            self._extension_relay = CDPRelayServer(
+                self._playwright,
+                browser_channel=self._config.browser_channel or self._config.browser,
+                executable_path=self._config.browser_launch_options.get("executable_path"),
+                user_data_dir=self._config.browser_user_data_dir,
             )
+            await self._extension_relay.start()
+            await self._extension_relay.establish_extension_connection("playwright-python-mcp")
+            self._browser = await self._playwright.chromium.connect_over_cdp(
+                self._extension_relay.cdp_endpoint(),
+                timeout=0,
+            )
+            return self._browser
 
         launch_options = dict(self._config.browser_launch_options)
         headless = bool(launch_options.get("headless", self._config.headless))

@@ -50,6 +50,16 @@ uv run playwright-python-mcp \
 
 When `--port` is provided, the server uses FastMCP Streamable HTTP transport at `/mcp`; otherwise it uses stdio.
 
+Existing browser connection modes:
+
+```bash
+uv run playwright-python-mcp --cdp-endpoint=http://localhost:9222
+uv run playwright-python-mcp --endpoint=ws://localhost:3000
+uv run playwright-python-mcp --extension
+```
+
+`--extension` starts a local Python CDP relay and opens the Playwright browser extension connect page. The Playwright Extension must already be installed in the selected Chrome/Edge profile.
+
 Supported configuration sources follow upstream merge order:
 
 1. Defaults.
