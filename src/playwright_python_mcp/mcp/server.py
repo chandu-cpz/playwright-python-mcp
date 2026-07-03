@@ -11,6 +11,7 @@ from urllib.parse import unquote, urlparse
 import anyio
 from fastmcp import FastMCP
 from fastmcp.server.context import Context as FastMCPContext
+from fastmcp.server.middleware import CallNext, Middleware as FastMCPMiddleware, MiddlewareContext
 from mcp.types import ToolAnnotations
 from starlette.middleware import Middleware
 from starlette.requests import Request
@@ -78,6 +79,7 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
     tools = filtered_tools(config)
     backend_pool = BackendPool(config, tools)
     app = FastMCP(name="Playwright", version=_package_version())
+    app.add_middleware(BackendSessionCleanupMiddleware(backend_pool))
 
     for tool in tools:
         read_only = tool.tool_type in {"readOnly", "assertion"}
@@ -198,6 +200,38 @@ class BackendPool:
         if self._shared_browser_owner is None:
             self._shared_browser_owner = BrowserBackend(self._config, self._tools)
         return self._shared_browser_owner
+
+
+class BackendSessionCleanupMiddleware(FastMCPMiddleware):
+    def __init__(self, backend_pool: BackendPool) -> None:
+        self._backend_pool = backend_pool
+        self._active_sessions: set[int] = set()
+        self._lock = anyio.Lock()
+
+    async def on_message(self, context: MiddlewareContext[Any], call_next: CallNext[Any, Any]) -> Any:
+        fastmcp_context = context.fastmcp_context
+        if fastmcp_context is None or fastmcp_context.request_context is None:
+            return await call_next(context)
+
+        session = fastmcp_context.session
+        session_identity = id(session)
+        session_id = _session_id(fastmcp_context)
+        async with self._lock:
+            if session_identity not in self._active_sessions:
+                task_group = getattr(session, "_subscription_task_group", None)
+                if task_group is not None:
+                    self._active_sessions.add(session_identity)
+                    task_group.start_soon(self._close_when_session_ends, session_identity, session_id)
+
+        return await call_next(context)
+
+    async def _close_when_session_ends(self, session_identity: int, session_id: str | None) -> None:
+        try:
+            await anyio.sleep_forever()
+        finally:
+            self._active_sessions.discard(session_identity)
+            with anyio.CancelScope(shield=True):
+                await self._backend_pool.close(session_id)
 
 
 def _make_fastmcp_handler(backend_pool: BackendPool, tool_name: str):
