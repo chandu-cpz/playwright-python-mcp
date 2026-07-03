@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from playwright_python_mcp.mcp.config import ServerConfig
 
 from ..tool import Tool
@@ -11,6 +13,7 @@ from .dialogs import dialog_tools
 from .devtools import devtools_tools
 from .evaluate import evaluate_tools
 from .files import file_tools
+from .find import find_tools
 from .form import form_tools
 from .keyboard import keyboard_tools
 from .mouse import mouse_tools
@@ -38,6 +41,7 @@ IMPLEMENTED_TOOLS = [
     *devtools_tools,
     *evaluate_tools,
     *file_tools,
+    *find_tools,
     *form_tools,
     *keyboard_tools,
     *mouse_tools,
@@ -57,13 +61,73 @@ IMPLEMENTED_TOOLS = [
     *wait_tools,
 ]
 
+_TAB_MODAL_BLOCKING_TOOLS = {
+    "browser_resize",
+    "browser_snapshot",
+    "browser_click",
+    "browser_select_option",
+    "browser_hover",
+    "browser_drag",
+    "browser_generate_locator",
+    "browser_check",
+    "browser_uncheck",
+    "browser_console_messages",
+    "browser_console_clear",
+    "browser_evaluate",
+    "browser_drop",
+    "browser_press_key",
+    "browser_type",
+    "browser_press_sequentially",
+    "browser_keydown",
+    "browser_keyup",
+    "browser_mouse_move_xy",
+    "browser_mouse_click_xy",
+    "browser_mouse_down",
+    "browser_mouse_up",
+    "browser_mouse_wheel",
+    "browser_mouse_drag_xy",
+    "browser_navigate_back",
+    "browser_navigate_forward",
+    "browser_reload",
+    "browser_network_requests",
+    "browser_network_request",
+    "browser_network_clear",
+    "browser_pdf_save",
+    "browser_find",
+    "browser_run_code_unsafe",
+    "browser_take_screenshot",
+    "browser_wait_for",
+    "browser_localstorage_list",
+    "browser_localstorage_get",
+    "browser_localstorage_set",
+    "browser_localstorage_delete",
+    "browser_localstorage_clear",
+    "browser_sessionstorage_list",
+    "browser_sessionstorage_get",
+    "browser_sessionstorage_set",
+    "browser_sessionstorage_delete",
+    "browser_sessionstorage_clear",
+    "browser_verify_element_visible",
+    "browser_verify_text_visible",
+    "browser_verify_list_visible",
+    "browser_verify_value",
+    "browser_highlight",
+    "browser_hide_highlight",
+}
+
 
 def filtered_tools(config: ServerConfig) -> list[Tool]:
     caps = set(config.caps or [])
     if "tracing" in caps:
         caps.add("devtools")
-    return [
+    tools = [
         tool
         for tool in IMPLEMENTED_TOOLS
         if not tool.skill_only and (tool.capability.startswith("core") or tool.capability in caps)
+    ]
+    return [
+        replace(tool, blocks_on_modal_state=True)
+        if tool.name in _TAB_MODAL_BLOCKING_TOOLS and not tool.clears_modal_state
+        else tool
+        for tool in tools
     ]

@@ -31,9 +31,18 @@ class BrowserBackend:
     - packages/playwright-core/src/tools/backend/browserBackend.ts
     """
 
-    def __init__(self, config: ServerConfig, tools: list[Tool]) -> None:
+    def __init__(
+        self,
+        config: ServerConfig,
+        tools: list[Tool],
+        *,
+        shared_browser_owner: BrowserBackend | None = None,
+        close_shared_browser: bool = True,
+    ) -> None:
         self._config = config
         self._tools = {tool.name: tool for tool in tools}
+        self._shared_browser_owner = shared_browser_owner
+        self._close_shared_browser = close_shared_browser
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._playwright_context: PlaywrightBrowserContext | None = None
@@ -41,7 +50,12 @@ class BrowserBackend:
         self._context: Context | None = None
         self._session_log: SessionLog | None = None
         self._disconnected = False
+        self._closed = False
         self._disconnect_listeners_registered = False
+
+    @property
+    def is_closed(self) -> bool:
+        return self._closed
 
     def has_page(self) -> bool:
         return self._context is not None and self._context.has_tab()
@@ -71,13 +85,19 @@ class BrowserBackend:
                 json_mode=bool(meta and meta.get("json")),
             )
             if _blocks_on_modal_state(context, tool):
-                response.add_error(f'Error: Tool "{name}" does not handle the modal state.')
+                if tool.clears_modal_state:
+                    response.add_error(
+                        f'Error: The tool "{name}" can only be used when there is related modal state present.'
+                    )
+                else:
+                    response.add_error(f'Error: Tool "{name}" does not handle the modal state.')
                 result = await response.serialize()
                 if self._disconnected:
                     result = _attach_close_marker(result)
                     await self.close()
                 return result
             await tool.handler(context, args, response)
+            _drain_unhandled_errors(context, response)
             result = await response.serialize()
             if self._session_log is not None:
                 await self._session_log.log_response(name, args, result)
@@ -104,23 +124,27 @@ class BrowserBackend:
             if self._context is not None:
                 with suppress(Exception):
                     await self._context.dispose()
-            if self._browser is not None:
+            if self._browser is not None and self._shared_browser_owner is None:
                 with suppress(Exception):
                     await self._browser.close()
             if self._extension_relay is not None:
                 with suppress(Exception):
                     await self._extension_relay.stop()
-            if self._playwright is not None:
+            if self._playwright is not None and self._shared_browser_owner is None:
                 with suppress(Exception):
                     await self._playwright.stop()
         finally:
             self._playwright = None
+            if self._close_shared_browser and self._shared_browser_owner is not None:
+                with suppress(Exception):
+                    await self._shared_browser_owner.close()
             self._browser = None
             self._playwright_context = None
             self._extension_relay = None
             self._context = None
             self._session_log = None
             self._disconnected = False
+            self._closed = True
             self._disconnect_listeners_registered = False
 
     async def render_page_markdown(self) -> list[str]:
@@ -144,12 +168,15 @@ class BrowserBackend:
 
     async def _ensure_context(self, *, cwd: Path, roots: list[str] | None) -> Context:
         if self._context is not None:
+            self._closed = False
             self._context.configure_client(
                 roots=[Path(root) for root in roots] if roots is not None else None,
                 cwd=cwd,
             )
             return self._context
-        if self._playwright is None:
+        if self._shared_browser_owner is not None:
+            self._browser = await self._shared_browser_owner._ensure_browser(cwd)
+        if self._shared_browser_owner is None and self._playwright is None:
             self._playwright = await async_playwright().start()
             self._playwright.selectors.set_test_id_attribute(self._config.test_id_attribute)
         if self._browser is None and self._playwright_context is None:
@@ -158,7 +185,10 @@ class BrowserBackend:
             browser_context = self._playwright_context
         else:
             assert self._browser is not None
-            browser_context = await self._browser.new_context(**self._config.browser_context_options)
+            if not self._config.browser_isolated and self._browser.contexts:
+                browser_context = self._browser.contexts[0]
+            else:
+                browser_context = await self._browser.new_context(**self._config.browser_context_options)
         self._register_disconnect_listeners(browser_context)
         if self._config.action_timeout is not None:
             browser_context.set_default_timeout(self._config.action_timeout)
@@ -170,10 +200,27 @@ class BrowserBackend:
             cwd=cwd,
         )
         await self._context.initialize()
+        self._closed = False
         if self._config.save_session:
             self._session_log = await SessionLog.create(self._context)
             self._context.session_log = self._session_log
         return self._context
+
+    async def _ensure_browser(self, cwd: Path) -> Browser:
+        if self._browser is not None:
+            return self._browser
+        if self._playwright is None:
+            self._playwright = await async_playwright().start()
+            self._playwright.selectors.set_test_id_attribute(self._config.test_id_attribute)
+        if self._browser is None and self._playwright_context is None:
+            self._browser = await self._launch_browser(cwd)
+        if self._browser is None and self._playwright_context is not None:
+            browser = self._playwright_context.browser
+            if browser is None:
+                raise ValueError("Persistent browser context did not expose a browser instance.")
+            self._browser = browser
+        assert self._browser is not None
+        return self._browser
 
     async def _launch_browser(self, cwd: Path | None = None) -> Browser:
         cwd = cwd or Path.cwd()
@@ -282,13 +329,23 @@ class BrowserBackend:
 
 
 def _blocks_on_modal_state(context: Context, tool: Tool) -> bool:
+    if not tool.blocks_on_modal_state and tool.clears_modal_state is None:
+        return False
     tab = context.current_tab()
     if tab is None:
         return False
     modal_states = tab.modal_states()
     if not modal_states:
-        return False
-    return not any(state.get("type") == tool.clears_modal_state for state in modal_states)
+        return tool.clears_modal_state is not None
+    if tool.clears_modal_state is not None:
+        return not any(state.get("type") == tool.clears_modal_state for state in modal_states)
+    return True
+
+
+def _drain_unhandled_errors(context: Context, response: Response) -> None:
+    errors: list[str] = getattr(context, "drain_unhandled_errors", lambda: [])()
+    for error in errors:
+        response.add_error(error)
 
 
 def _output_dir(config: ServerConfig, cwd: Path) -> Path:

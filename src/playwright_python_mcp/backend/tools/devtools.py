@@ -96,7 +96,7 @@ devtools_tools = [
         name="browser_highlight",
         capability="devtools",
         tool_type="readOnly",
-        parameters=(param("target", str), param("element", str), param("style", str | None, None)),
+        parameters=(param("target", str), param("element", str | None, None), param("style", str | None, None)),
         handler=_handle_highlight,
     ),
     Tool(

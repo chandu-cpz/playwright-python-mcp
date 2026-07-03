@@ -25,8 +25,12 @@ from playwright_python_mcp.mcp.config import ServerConfig
 class PlaywrightMCPServer:
     app: FastMCP
     config: ServerConfig
-    backend: BrowserBackend
+    backend_pool: BackendPool
     _cancel_scope: anyio.CancelScope | None = field(default=None, init=False)
+
+    @property
+    def backend(self) -> BrowserBackend:
+        return self.backend_pool.default_backend()
 
     def trigger_shutdown(self) -> None:
         if self._cancel_scope is not None:
@@ -67,17 +71,17 @@ class PlaywrightMCPServer:
                     await self.app.run_async(transport=transport, **transport_kwargs)
                 finally:
                     task_group.cancel_scope.cancel()
-                    await _close_backend_with_timeout(self.backend)
+                    await self.backend_pool.close_all()
 
 
 def create_server(config: ServerConfig) -> PlaywrightMCPServer:
     tools = filtered_tools(config)
-    backend = BrowserBackend(config, tools)
+    backend_pool = BackendPool(config, tools)
     app = FastMCP(name="Playwright", version=_package_version())
 
     for tool in tools:
         read_only = tool.tool_type in {"readOnly", "assertion"}
-        handler = _make_fastmcp_handler(backend, tool.name)
+        handler = _make_fastmcp_handler(backend_pool, tool.name)
         signature = tool.signature()
         handler.__signature__ = Signature(
             parameters=[
@@ -102,7 +106,7 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
             run_in_thread=False,
         )(handler)
 
-    server = PlaywrightMCPServer(app=app, config=config, backend=backend)
+    server = PlaywrightMCPServer(app=app, config=config, backend_pool=backend_pool)
     _register_kill_endpoint(app, server)
     return server
 
@@ -137,13 +141,77 @@ def _http_middleware(config: ServerConfig) -> list[Middleware]:
     return [Middleware(HostAllowlistMiddleware, allowed_hosts=config.allowed_hosts, bind_host=config.server_host)]
 
 
-def _make_fastmcp_handler(backend: BrowserBackend, tool_name: str):
+class BackendPool:
+    def __init__(self, config: ServerConfig, tools: list[Any]) -> None:
+        self._config = config
+        self._tools = tools
+        self._backends: dict[str, BrowserBackend] = {}
+        self._default_key = "__default__"
+        self._shared_browser_owner: BrowserBackend | None = None
+        self._client_count = 0
+
+    def default_backend(self) -> BrowserBackend:
+        backend = self._backends.get(self._default_key)
+        if backend is None:
+            backend = BrowserBackend(self._config, self._tools)
+            self._backends[self._default_key] = backend
+        return backend
+
+    async def backend_for(self, key: str | None) -> BrowserBackend:
+        key = key or self._default_key
+        backend = self._backends.get(key)
+        if backend is None:
+            backend = BrowserBackend(
+                self._config,
+                self._tools,
+                shared_browser_owner=self._shared_owner() if self._uses_shared_browser_owner() else None,
+                close_shared_browser=False,
+            )
+            self._backends[key] = backend
+            self._client_count += 1
+        return backend
+
+    async def close(self, key: str | None) -> None:
+        key = key or self._default_key
+        backend = self._backends.pop(key, None)
+        if backend is not None:
+            await _close_backend_with_timeout(backend)
+            self._client_count = max(0, self._client_count - 1)
+        if self._client_count == 0 and self._shared_browser_owner is not None:
+            await _close_backend_with_timeout(self._shared_browser_owner)
+            self._shared_browser_owner = None
+
+    async def close_all(self) -> None:
+        backends = list(self._backends.values())
+        self._backends.clear()
+        for backend in backends:
+            await _close_backend_with_timeout(backend)
+        self._client_count = 0
+        if self._shared_browser_owner is not None:
+            await _close_backend_with_timeout(self._shared_browser_owner)
+            self._shared_browser_owner = None
+
+    def _uses_shared_browser_owner(self) -> bool:
+        return bool(self._config.shared_browser_context or self._config.browser_isolated)
+
+    def _shared_owner(self) -> BrowserBackend:
+        if self._shared_browser_owner is None:
+            self._shared_browser_owner = BrowserBackend(self._config, self._tools)
+        return self._shared_browser_owner
+
+
+def _make_fastmcp_handler(backend_pool: BackendPool, tool_name: str):
     @wraps(_tool_handler)
     async def handler(**kwargs: Any):
         ctx = kwargs.pop("ctx", None)
         meta = kwargs.pop("_meta", None)
         roots = await _list_roots(ctx)
-        return await backend.call_tool(tool_name, kwargs, roots=roots, meta=meta)
+        session_id = _session_id(ctx)
+        backend = await backend_pool.backend_for(session_id)
+        result = await backend.call_tool(tool_name, kwargs, roots=roots, meta=meta)
+        if backend.is_closed:
+            await backend_pool.close(session_id)
+        return result
 
     return handler
 
@@ -176,6 +244,16 @@ async def _list_roots(ctx: FastMCPContext | None) -> list[str] | None:
         if uri.startswith("file://"):
             result.append(unquote(urlparse(uri).path))
     return result
+
+
+def _session_id(ctx: FastMCPContext | None) -> str | None:
+    if ctx is None:
+        return None
+    value = getattr(ctx, "session_id", None)
+    if value:
+        return str(value)
+    value = getattr(ctx, "client_id", None)
+    return str(value) if value else None
 
 
 async def _close_backend_with_timeout(backend: BrowserBackend) -> None:

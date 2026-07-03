@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 from contextlib import suppress
@@ -76,8 +77,10 @@ class Context:
         self.session_log: SessionLog | None = None
         self.trace_legend: TraceLegend | None = None
         self._video_recording: VideoRecording | None = None
+        self._pending_unhandled_errors: list[str] = []
 
     async def initialize(self) -> None:
+        self._install_exception_handler()
         await self._setup_request_interception()
         for init_script in self.config.init_scripts:
             await self._browser_context.add_init_script(path=init_script)
@@ -118,6 +121,7 @@ class Context:
     async def dispose(self) -> None:
         with suppress(Exception):
             await self.stop_video_recording()
+        self._restore_exception_handler()
         for tab in self._tabs:
             await tab.dispose()
         await self._browser_context.close()
@@ -256,6 +260,15 @@ class Context:
                 text = text.replace(secret_value, f"<secret>{secret_name}</secret>")
         return text
 
+    def drain_unhandled_errors(self) -> list[str]:
+        errors = list(self._pending_unhandled_errors)
+        self._pending_unhandled_errors.clear()
+        return errors
+
+    def track_task(self, task: asyncio.Task[Any]) -> asyncio.Task[Any]:
+        task.add_done_callback(self._capture_task_exception)
+        return task
+
     def lookup_secret(self, secret_name: str) -> LookupSecret:
         secret_value = (self.config.secrets or {}).get(secret_name)
         if secret_value is None:
@@ -301,9 +314,7 @@ class Context:
         page.on("close", lambda _: self._on_page_closed(tab))
         page.on("crash", lambda _: self._on_page_crashed(tab))
         if self._video_recording is not None:
-            import asyncio
-
-            asyncio.create_task(self._start_page_video(page))
+            self.track_task(asyncio.create_task(self._start_page_video(page)))
         return tab
 
     async def _start_page_video(self, page: Page) -> None:
@@ -320,6 +331,25 @@ class Context:
 
     def _tab_for_page(self, page: Any) -> Tab | None:
         return next((tab for tab in self._tabs if tab.page is page), None)
+
+    def _install_exception_handler(self) -> None:
+        loop = asyncio.get_running_loop()
+        _ACTIVE_ERROR_CONTEXTS.add(self)
+        _install_loop_exception_dispatcher(loop)
+
+    def _restore_exception_handler(self) -> None:
+        _ACTIVE_ERROR_CONTEXTS.discard(self)
+        _restore_loop_exception_dispatcher_if_unused()
+
+    def _capture_task_exception(self, task: asyncio.Task[Any]) -> None:
+        if task.cancelled():
+            return
+        try:
+            exception = task.exception()
+        except Exception as exc:
+            exception = exc
+        if exception is not None:
+            self._pending_unhandled_errors.append(str(exception))
 
 
 def _is_relative_to(path: Path, parent: Path) -> bool:
@@ -345,3 +375,41 @@ def _origin_or_host_glob(origin_or_host: str) -> str:
     if parsed.scheme in {"http", "https"} and parsed.netloc:
         return f"{parsed.scheme}://{parsed.netloc}/**"
     return f"*://{origin_or_host}/**"
+
+
+_ACTIVE_ERROR_CONTEXTS: set[Context] = set()
+_DISPATCHER_LOOP: asyncio.AbstractEventLoop | None = None
+_PREVIOUS_EXCEPTION_HANDLER: Callable[[asyncio.AbstractEventLoop, dict[str, Any]], object] | None = None
+_DISPATCHER_HANDLER: Callable[[asyncio.AbstractEventLoop, dict[str, Any]], None] | None = None
+
+
+def _install_loop_exception_dispatcher(loop: asyncio.AbstractEventLoop) -> None:
+    global _DISPATCHER_LOOP, _PREVIOUS_EXCEPTION_HANDLER, _DISPATCHER_HANDLER
+    if _DISPATCHER_LOOP is loop and _DISPATCHER_HANDLER is not None:
+        return
+    if _DISPATCHER_LOOP is not None and _DISPATCHER_LOOP is not loop:
+        _restore_loop_exception_dispatcher_if_unused(force=True)
+    _DISPATCHER_LOOP = loop
+    _PREVIOUS_EXCEPTION_HANDLER = loop.get_exception_handler()
+
+    def handler(current_loop: asyncio.AbstractEventLoop, event: dict[str, Any]) -> None:
+        exception = event.get("exception")
+        message = str(exception) if exception is not None else str(event.get("message", "Unhandled async exception"))
+        for context in list(_ACTIVE_ERROR_CONTEXTS):
+            context._pending_unhandled_errors.append(message)
+        if _PREVIOUS_EXCEPTION_HANDLER is not None:
+            _PREVIOUS_EXCEPTION_HANDLER(current_loop, event)
+
+    _DISPATCHER_HANDLER = handler
+    loop.set_exception_handler(handler)
+
+
+def _restore_loop_exception_dispatcher_if_unused(*, force: bool = False) -> None:
+    global _DISPATCHER_LOOP, _PREVIOUS_EXCEPTION_HANDLER, _DISPATCHER_HANDLER
+    if not force and _ACTIVE_ERROR_CONTEXTS:
+        return
+    if _DISPATCHER_LOOP is not None and _DISPATCHER_LOOP.get_exception_handler() is _DISPATCHER_HANDLER:
+        _DISPATCHER_LOOP.set_exception_handler(_PREVIOUS_EXCEPTION_HANDLER)
+    _DISPATCHER_LOOP = None
+    _PREVIOUS_EXCEPTION_HANDLER = None
+    _DISPATCHER_HANDLER = None

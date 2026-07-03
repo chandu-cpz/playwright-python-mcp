@@ -102,6 +102,10 @@ run_code_tools = [
     Tool(
         name="browser_run_code_unsafe",
         capability="core",
+        description=(
+            "Run Python Playwright code against the current page. "
+            "This is an intentional Python-native divergence from upstream JavaScript snippet execution."
+        ),
         parameters=(param("code", str | None, None), param("filename", str | None, None)),
         handler=_handle_run_code_unsafe,
     )

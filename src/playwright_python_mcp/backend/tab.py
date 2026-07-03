@@ -111,7 +111,7 @@ class Tab:
         self._main_document_status: DocumentStatus | None = None
         self._navigation_index = 0
         self._console_log = LogFile(context, file_prefix="console", title="Console")
-        self._initialized = asyncio.create_task(self._initialize())
+        self._initialized = context.track_task(asyncio.create_task(self._initialize()))
         page.on("console", self._on_console_message)
         page.on("pageerror", self._on_page_error)
         page.on("request", self._on_request)
@@ -279,8 +279,8 @@ class Tab:
                 await self.wait_for_timeout(0.5)
             return result
 
-        action_task = asyncio.create_task(action_and_settle())
-        modal_task = asyncio.create_task(self._modal_event.wait())
+        action_task = self.context.track_task(asyncio.create_task(action_and_settle()))
+        modal_task = self.context.track_task(asyncio.create_task(self._modal_event.wait()))
         done, pending = await asyncio.wait({action_task, modal_task}, return_when=asyncio.FIRST_COMPLETED)
         if action_task in done:
             modal_task.cancel()
@@ -394,8 +394,14 @@ class Tab:
             )
         aria_snapshot = ""
         if include_aria:
-            locator = await self.snapshot_locator(target)
-            aria_snapshot = await locator.aria_snapshot(mode="ai", depth=depth, boxes=boxes)
+            aria_snapshot = await self._aria_snapshot_race(target=target, depth=depth, boxes=boxes)
+            if self._modal_states:
+                return TabSnapshot(
+                    aria_snapshot="",
+                    modal_states=list(self._modal_states),
+                    events=[],
+                    console_link=await self._console_log.take(relative_to=relative_to),
+                )
         snapshot = TabSnapshot(
             aria_snapshot=aria_snapshot,
             modal_states=list(self._modal_states),
@@ -465,7 +471,7 @@ class Tab:
 
     async def snapshot_locator(self, target: str | None) -> Locator:
         if target is None:
-            return self.page.locator("body")
+            raise ValueError("Full-page snapshots use page.aria_snapshot(); no locator is available.")
         return (await self.resolve_target(target=target)).locator
 
     def console_message_count(self) -> dict[str, int]:
@@ -590,13 +596,13 @@ class Tab:
     def _on_download(self, download: Download) -> None:
         import asyncio
 
-        asyncio.create_task(self._download_started(download))
+        self.context.track_task(asyncio.create_task(self._download_started(download)))
 
     async def _title_or_empty(self) -> str:
         if self._modal_states:
             return ""
-        title_task = asyncio.create_task(self.page.title())
-        modal_task = asyncio.create_task(self._modal_event.wait())
+        title_task = self.context.track_task(asyncio.create_task(self.page.title()))
+        modal_task = self.context.track_task(asyncio.create_task(self._modal_event.wait()))
         done, pending = await asyncio.wait({title_task, modal_task}, return_when=asyncio.FIRST_COMPLETED)
         for task in pending:
             task.cancel()
@@ -638,7 +644,7 @@ class Tab:
 
         if not _should_include_console_message(self.context.config.console_level, entry.type):
             return
-        asyncio.create_task(self._console_log.append_line(time.time() * 1000, entry.render()))
+        self.context.track_task(asyncio.create_task(self._console_log.append_line(time.time() * 1000, entry.render())))
 
     async def _initialize(self) -> None:
         messages = await self.page.console_messages(filter="all")
@@ -651,6 +657,31 @@ class Tab:
         for request in requests:
             if request.existing_response is not None or request.failure is not None:
                 self._requests.append(RequestEntry(request=request))
+
+    async def _aria_snapshot_race(
+        self,
+        *,
+        target: str | None,
+        depth: int | None,
+        boxes: bool | None,
+    ) -> str:
+        if self._modal_states:
+            return ""
+
+        async def capture() -> str:
+            if target is None:
+                return await self.page.aria_snapshot(mode="ai", depth=depth, boxes=boxes)
+            locator = await self.snapshot_locator(target)
+            return await locator.aria_snapshot(mode="ai", depth=depth, boxes=boxes)
+
+        capture_task = self.context.track_task(asyncio.create_task(capture()))
+        modal_task = self.context.track_task(asyncio.create_task(self._modal_event.wait()))
+        done, pending = await asyncio.wait({capture_task, modal_task}, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        if modal_task in done:
+            return ""
+        return await capture_task
 
     async def wait_for_timeout(self, seconds: float) -> None:
         if any(state.get("type") == "dialog" for state in self._modal_states):

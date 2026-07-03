@@ -44,6 +44,7 @@ class ServerConfig:
     output_max_size: int | None = None
     output_mode: str = "file"
     save_session: bool = False
+    shared_browser_context: bool = False
     secrets: dict[str, str] | None = None
     snapshot_mode: str = "full"
     action_timeout: int | None = 5000
@@ -300,8 +301,24 @@ def _validate_and_complete(config: dict[str, Any]) -> None:
         launch_options["channel"] = default_channel
     if launch_options.get("headless") is None:
         launch_options["headless"] = os.name == "posix" and not os.environ.get("DISPLAY")
+    if browser.get("browserName") == "chromium":
+        channel = launch_options.get("channel")
+        if launch_options.get("chromiumSandbox") is None:
+            launch_options["chromiumSandbox"] = (
+                os.name != "posix"
+                or channel not in {"chromium", "chrome-for-testing"}
+            )
+        args = list(launch_options.get("args") or [])
+        if not any(str(arg).startswith("--disable-blink-features") for arg in args):
+            args.append("--disable-blink-features=AutomationControlled")
+        launch_options["args"] = args
     if context_options.get("viewport") is None:
         context_options["viewport"] = {"width": 1280, "height": 720} if launch_options.get("headless") else None
+    if browser.get("initPage"):
+        raise ValueError(
+            "browser.initPage / --init-page is not supported by the Python port yet; "
+            "remove it or port the init-page module to Python-native initialization."
+        )
     console = config.setdefault("console", {})
     if console.get("level") not in {None, "error", "warning", "info", "debug"}:
         raise ValueError('console.level must be one of "error", "warning", "info", "debug"')
@@ -333,6 +350,7 @@ def _server_config_from_merged(config: dict[str, Any]) -> ServerConfig:
         output_max_size=config.get("outputMaxSize"),
         output_mode=str(config.get("outputMode") or "file"),
         save_session=bool(config.get("saveSession", False)),
+        shared_browser_context=bool(config.get("sharedBrowserContext", False)),
         secrets=config.get("secrets"),
         snapshot_mode=str(snapshot.get("mode") or "full"),
         action_timeout=timeouts.get("action"),
@@ -369,6 +387,7 @@ def _to_python_launch_options(options: dict[str, Any]) -> dict[str, Any]:
         "headless": "headless",
         "chromiumSandbox": "chromium_sandbox",
         "proxy": "proxy",
+        "args": "args",
         "ignoreDefaultArgs": "ignore_default_args",
         "handleSIGINT": "handle_sigint",
         "handleSIGTERM": "handle_sigterm",

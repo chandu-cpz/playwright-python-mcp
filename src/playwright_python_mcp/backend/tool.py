@@ -32,6 +32,7 @@ class Tool:
     tool_type: ToolType = "action"
     skill_only: bool = False
     clears_modal_state: str | None = None
+    blocks_on_modal_state: bool = False
 
     def signature(self) -> Signature:
         return Signature(
