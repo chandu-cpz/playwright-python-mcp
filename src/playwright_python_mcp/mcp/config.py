@@ -293,8 +293,6 @@ def _validate_and_complete(config: dict[str, Any]) -> None:
     context_options = browser.setdefault("contextOptions", {})
     if browser.get("isolated") and browser.get("userDataDir"):
         raise ValueError("Browser userDataDir is not supported in isolated mode.")
-    if browser.get("isolated") and browser.get("cdpEndpoint"):
-        raise ValueError("Browser CDP endpoint is not supported in isolated mode.")
     browser_name, default_channel = _resolve_browser_param(None)
     browser["browserName"] = browser.get("browserName") or browser_name
     if launch_options.get("channel") is None and browser.get("browserName") == "chromium":
