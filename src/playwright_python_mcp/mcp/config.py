@@ -305,6 +305,8 @@ def _validate_and_complete(config: dict[str, Any]) -> None:
     console = config.setdefault("console", {})
     if console.get("level") not in {None, "error", "warning", "info", "debug"}:
         raise ValueError('console.level must be one of "error", "warning", "info", "debug"')
+    if config.get("outputMode") not in {None, "file", "stdout"}:
+        raise ValueError('outputMode must be one of "file" or "stdout"')
 
 
 def _server_config_from_merged(config: dict[str, Any]) -> ServerConfig:

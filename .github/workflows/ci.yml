@@ -1,15 +1,14 @@
-name: Publish
+name: CI
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+  pull_request:
 
 jobs:
-  publish:
+  test:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -33,4 +32,3 @@ jobs:
       - run: /tmp/pw-mcp-smoke/bin/python -m pip install dist/*.whl
       - run: /tmp/pw-mcp-smoke/bin/playwright-python-mcp --help
       - run: /tmp/pw-mcp-smoke/bin/python -m playwright_python_mcp --help
-      - run: uv publish --token ${{ secrets.PYPI_TOKEN }}

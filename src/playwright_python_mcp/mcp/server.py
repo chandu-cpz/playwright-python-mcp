@@ -76,6 +76,7 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
     app = FastMCP(name="Playwright", version=_package_version())
 
     for tool in tools:
+        read_only = tool.tool_type in {"readOnly", "assertion"}
         handler = _make_fastmcp_handler(backend, tool.name)
         signature = tool.signature()
         handler.__signature__ = Signature(
@@ -92,8 +93,8 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
             title=tool.title or _title_from_name(tool.name),
             description=tool.description or tool.name,
             annotations=ToolAnnotations(
-                readOnlyHint=tool.tool_type == "readOnly",
-                destructiveHint=False if tool.tool_type == "readOnly" else None,
+                readOnlyHint=read_only,
+                destructiveHint=not read_only,
                 openWorldHint=True,
             ),
             run_in_thread=False,
@@ -105,12 +106,12 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
 
 
 def _register_kill_endpoint(app: FastMCP, server: PlaywrightMCPServer) -> None:
-    @app.custom_route("/killkillkill", methods=["POST"])  # type: ignore[arg-type]
+    @app.custom_route("/killkillkill", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])  # type: ignore[arg-type]
     async def _handle_kill(request: Request) -> PlainTextResponse:
-        if request.headers.get("x-pw-mcp-kill") == "1":
-            server.trigger_shutdown()
-            return PlainTextResponse("ok", status_code=200)
-        return PlainTextResponse("missing x-pw-mcp-kill header", status_code=400)
+        if request.method != "POST" or request.headers.get("x-pw-mcp-kill") != "1":
+            return PlainTextResponse("", status_code=405)
+        server.trigger_shutdown()
+        return PlainTextResponse("Killing process", status_code=200)
 
 
 class HostAllowlistMiddleware:

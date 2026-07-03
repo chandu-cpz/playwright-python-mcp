@@ -64,6 +64,8 @@ def test_fastmcp_read_only_annotations_match_tool_surface() -> None:
             "browser_localstorage_list",
             "browser_start_tracing",
             "browser_start_video",
+            "browser_wait_for",
+            "browser_verify_text_visible",
         }
         action_or_input_names = {
             "browser_click",
@@ -79,11 +81,13 @@ def test_fastmcp_read_only_annotations_match_tool_surface() -> None:
             tool = cast(Any, await server.app.get_tool(name))
             assert tool.annotations is not None
             assert tool.annotations.readOnlyHint is True, name
+            assert tool.annotations.destructiveHint is False, name
 
         for name in action_or_input_names:
             tool = cast(Any, await server.app.get_tool(name))
             assert tool.annotations is not None
             assert tool.annotations.readOnlyHint is False, name
+            assert tool.annotations.destructiveHint is True, name
 
     asyncio.run(run())
 
@@ -209,7 +213,7 @@ def test_explicit_snapshot_is_inline_by_default(tmp_path: Path) -> None:
 def test_action_snapshot_uses_file_for_full_mode(tmp_path: Path) -> None:
     async def run() -> None:
         tab = FakeTab(aria_snapshot='- button "Submit" [ref=e1]')
-        context = FakeContext(tab, tmp_path, snapshot_mode="full")
+        context = FakeContext(tab, tmp_path, snapshot_mode="full", output_mode="file")
         response = Response(cast(Context, context), tool_name="browser_click", tool_args={})
         response.set_include_snapshot()
 
@@ -219,6 +223,42 @@ def test_action_snapshot_uses_file_for_full_mode(tmp_path: Path) -> None:
         assert "[Snapshot](" in result
         assert "```yaml" not in result
         assert (tmp_path / "page.yml").read_text(encoding="utf-8") == '- button "Submit" [ref=e1]'
+
+    asyncio.run(run())
+
+
+def test_action_snapshot_uses_inline_yaml_for_stdout_mode(tmp_path: Path) -> None:
+    async def run() -> None:
+        tab = FakeTab(aria_snapshot='- button "Submit" [ref=e1]')
+        context = FakeContext(tab, tmp_path, snapshot_mode="full", output_mode="stdout")
+        response = Response(cast(Context, context), tool_name="browser_click", tool_args={})
+        response.set_include_snapshot()
+
+        result = await response.serialize()
+
+        assert isinstance(result, str)
+        assert "```yaml" in result
+        assert '- button "Submit" [ref=e1]' in result
+        assert not (tmp_path / "page.yml").exists()
+
+    asyncio.run(run())
+
+
+def test_stdout_mode_returns_text_file_results_inline(tmp_path: Path) -> None:
+    async def run() -> None:
+        from playwright_python_mcp.backend.context import FilenameTemplate
+
+        context = FakeContext(FakeTab(), tmp_path, output_mode="stdout")
+        response = Response(cast(Context, context), tool_name="browser_console_messages", tool_args={})
+        resolved = await response.resolve_client_file(FilenameTemplate(prefix="console", ext="log"), "Console")
+        await response.add_file_result(resolved, "hello")
+
+        result = await response.serialize()
+
+        assert isinstance(result, str)
+        assert "hello" in result
+        assert "[Console]" not in result
+        assert not resolved.file_name.exists()
 
     asyncio.run(run())
 
@@ -290,12 +330,13 @@ class FakeTab:
 
 
 class FakeContext:
-    def __init__(self, tab: FakeTab, cwd: Path, *, snapshot_mode: str = "none") -> None:
+    def __init__(self, tab: FakeTab, cwd: Path, *, snapshot_mode: str = "none", output_mode: str = "stdout") -> None:
         self.cwd = cwd
         self.debugger = FakeDebugger()
         self.config = SimpleNamespace(
             codegen="python",
             snapshot_mode=snapshot_mode,
+            output_mode=output_mode,
             image_responses="omit",
             output_max_size=None,
         )
@@ -334,6 +375,42 @@ def test_killkillkill_endpoint_is_registered_on_http_app() -> None:
     assert len(kill_routes) == 1
 
 
+def test_killkillkill_endpoint_requires_post_and_header() -> None:
+    async def run() -> None:
+        server = create_server(_config())
+
+        missing_header = await _call_http_app(server.app.http_app(), method="POST", headers=[])
+        wrong_method = await _call_http_app(
+            server.app.http_app(),
+            method="GET",
+            headers=[(b"x-pw-mcp-kill", b"1")],
+        )
+
+        assert missing_header == (405, "")
+        assert wrong_method == (405, "")
+
+    asyncio.run(run())
+
+
+def test_killkillkill_endpoint_triggers_shutdown() -> None:
+    async def run() -> None:
+        import anyio
+
+        server = create_server(_config())
+        with anyio.CancelScope() as scope:
+            server._cancel_scope = scope
+            status, body = await _call_http_app(
+                server.app.http_app(),
+                method="POST",
+                headers=[(b"x-pw-mcp-kill", b"1")],
+            )
+
+            assert (status, body) == (200, "Killing process")
+            assert scope.cancel_called is True
+
+    asyncio.run(run())
+
+
 def test_trigger_shutdown_cancels_active_scope() -> None:
     import anyio
 
@@ -345,3 +422,34 @@ def test_trigger_shutdown_cancels_active_scope() -> None:
             assert scope.cancel_called is True
 
     anyio.run(run)
+
+
+async def _call_http_app(app: Any, *, method: str, headers: list[tuple[bytes, bytes]]) -> tuple[int, str]:
+    messages: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict[str, Any]) -> None:
+        messages.append(message)
+
+    await app(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": method,
+            "scheme": "http",
+            "path": "/killkillkill",
+            "raw_path": b"/killkillkill",
+            "query_string": b"",
+            "headers": [(b"host", b"localhost"), *headers],
+            "client": ("127.0.0.1", 12345),
+            "server": ("localhost", 80),
+        },
+        receive,
+        send,
+    )
+    start = next(message for message in messages if message["type"] == "http.response.start")
+    body = b"".join(message.get("body", b"") for message in messages if message["type"] == "http.response.body")
+    return int(start["status"]), body.decode("utf-8")

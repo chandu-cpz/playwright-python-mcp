@@ -6,7 +6,9 @@ from typing import Any, cast
 
 from playwright_python_mcp.backend.browser_backend import BrowserBackend
 from playwright_python_mcp.backend.context import Context
+from playwright_python_mcp.backend.response import Response
 from playwright_python_mcp.backend.tool import Tool
+from playwright_python_mcp.backend.tools.common import common_tools
 from playwright_python_mcp.mcp.config import load_config
 
 
@@ -71,6 +73,26 @@ def test_unexpected_tool_error_does_not_close_browser_backend() -> None:
     asyncio.run(run())
 
 
+def test_browser_close_does_not_prevent_next_tool_call() -> None:
+    async def probe_handler(_context: Context, _params: dict[str, Any], response: Response) -> None:
+        response.add_text_result("alive")
+
+    async def run() -> None:
+        backend = ErrorBackend(
+            _config(),
+            [*common_tools, Tool(name="browser_probe", capability="core", handler=probe_handler)],
+        )
+
+        close_result = await backend.call_tool("browser_close", {})
+        next_result = await backend.call_tool("browser_probe", {})
+
+        assert backend.closed is True
+        assert getattr(close_result, "meta") == {"isClose": True}
+        assert next_result == "### Result\nalive"
+
+    asyncio.run(run())
+
+
 class ErrorBackend(BrowserBackend):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -112,6 +134,23 @@ class FakePersistentContext:
 
 class FakeContext:
     cwd = Path.cwd()
+    config = type(
+        "FakeConfig",
+        (),
+        {
+            "codegen": "python",
+            "snapshot_mode": "none",
+            "image_responses": "omit",
+            "output_max_size": None,
+            "output_mode": "stdout",
+        },
+    )()
 
     def current_tab(self) -> None:
         return None
+
+    def tabs(self) -> list[object]:
+        return []
+
+    def redact_secrets(self, text: str) -> str:
+        return text

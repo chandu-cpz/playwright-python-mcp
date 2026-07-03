@@ -28,6 +28,7 @@ class ResolvedFile:
     file_name: Path
     relative_name: str
     printable_link: str
+    explicit: bool
 
 
 class Response:
@@ -77,12 +78,16 @@ class Response:
             file_name=file_name,
             relative_name=relative_name,
             printable_link=f"- [{title}]({relative_name})",
+            explicit=bool(template.suggested_filename),
         )
 
     async def resolve_client_filename(self, filename: str) -> Path:
         return await self._context.workspace_file(filename, self._client_workspace)
 
     async def add_file_result(self, resolved_file: ResolvedFile, data: bytes | str | None) -> None:
+        if _output_mode(self._context) == "stdout" and isinstance(data, str) and not resolved_file.explicit:
+            self.add_text_result(data)
+            return
         await self._write_file(resolved_file, data)
         self.add_text_result(resolved_file.printable_link)
 
@@ -160,7 +165,14 @@ class Response:
             sections.append(("Modal state", render_modal_states(tab_snapshot.modal_states), None, False))
 
         if tab_snapshot is not None and self._snapshot_request is not None and self._snapshot_request.mode != "none":
-            if self._snapshot_request.mode != "explicit" or self._snapshot_request.file_name is not None:
+            should_write_snapshot = (
+                self._snapshot_request.file_name is not None
+                or (
+                    self._snapshot_request.mode != "explicit"
+                    and _output_mode(self._context) == "file"
+                )
+            )
+            if should_write_snapshot:
                 from .context import FilenameTemplate
 
                 suggested_filename = self._snapshot_request.file_name
@@ -366,3 +378,7 @@ def _field(value: object, name: str) -> object | None:
 
 def _snapshot_mode(value: str) -> Literal["none", "full"]:
     return "none" if value == "none" else "full"
+
+
+def _output_mode(context: Context) -> Literal["file", "stdout"]:
+    return "stdout" if getattr(context.config, "output_mode", "file") == "stdout" else "file"

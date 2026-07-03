@@ -115,6 +115,30 @@ def test_save_session_config_is_preserved() -> None:
     assert config.as_public_dict()["saveSession"] is True
 
 
+def test_output_mode_defaults_to_file_and_accepts_stdout() -> None:
+    default_config = load_config(
+        browser=None,
+        caps="config",
+        config_path=None,
+        headless=True,
+        test_id_attribute="data-testid",
+        vision=False,
+    )
+    file_config = load_config(
+        browser=None,
+        caps="config",
+        config_path=None,
+        headless=True,
+        test_id_attribute="data-testid",
+        vision=False,
+        output_mode="stdout",
+    )
+
+    assert default_config.output_mode == "file"
+    assert default_config.as_public_dict()["outputMode"] == "file"
+    assert file_config.output_mode == "stdout"
+
+
 def test_isolated_rejects_user_data_dir(tmp_path: Path) -> None:
     try:
         load_config(
@@ -148,3 +172,20 @@ def test_console_level_validation() -> None:
         assert "console.level must be one of" in str(exc)
     else:
         raise AssertionError("Expected console level validation error")
+
+
+def test_output_mode_validation() -> None:
+    try:
+        load_config(
+            browser=None,
+            caps="config",
+            config_path=None,
+            headless=True,
+            test_id_attribute="data-testid",
+            vision=False,
+            output_mode="json",
+        )
+    except ValueError as exc:
+        assert "outputMode must be one of" in str(exc)
+    else:
+        raise AssertionError("Expected output mode validation error")
