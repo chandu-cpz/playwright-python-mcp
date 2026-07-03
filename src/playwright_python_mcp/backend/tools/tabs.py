@@ -15,15 +15,11 @@ async def _handle_tabs(context: Context, params: dict[str, Any], response: Respo
     if action == "list":
         await context.ensure_tab()
     elif action == "new":
-        if not context.has_tab():
-            await context.ensure_tab()
         tab = await context.new_tab()
         if params.get("url"):
-            url = await context.check_url_and_navigate(params["url"])
+            url = await tab.check_url_and_navigate(params["url"])
             response.set_include_snapshot()
             response.add_code(f"await page.goto({python_literal(url)})")
-            # context.check_url_and_navigate creates/uses the current tab; keep the new tab current.
-            await context.select_tab(context.tabs().index(tab))
     elif action == "close":
         await context.close_tab(params.get("index"))
     elif action == "select":

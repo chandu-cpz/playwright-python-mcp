@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import urlparse
 
 from playwright.async_api import (
     ConsoleMessage,
@@ -141,6 +142,17 @@ class Tab:
     async def close(self) -> None:
         await self.page.close()
 
+    def log_error_message(self, text: str) -> None:
+        entry = ConsoleEntry(
+            type="error",
+            text=text,
+            location_url=self.page.url,
+            navigation_index=self._navigation_index,
+        )
+        self._console_messages.append(entry)
+        self._add_log_entry({"type": "console", "message": entry})
+        self._append_console_log(entry)
+
     async def navigate(self, url: str) -> None:
         await self._initialized
         self._clear_collected_artifacts()
@@ -168,6 +180,23 @@ class Tab:
             await self.page.wait_for_load_state("load", timeout=5000)
         except Error:
             pass
+
+    async def check_url_and_navigate(self, url: str) -> str:
+        try:
+            parsed = urlparse(url)
+            if not parsed.scheme:
+                if url.startswith("localhost"):
+                    url = "http://" + url
+                else:
+                    url = "https://" + url
+        except Exception:
+            if url.startswith("localhost"):
+                url = "http://" + url
+            else:
+                url = "https://" + url
+        self.context._check_url_allowed(url)
+        await self.navigate(url)
+        return url
 
     async def go_back(self) -> None:
         await self.page.go_back(wait_until="commit", timeout=self.navigation_timeout)
@@ -711,16 +740,25 @@ class Tab:
             await asyncio.sleep(seconds)
 
 
+_CONSOLE_MESSAGE_LEVELS = ["error", "warning", "info", "debug"]
+
+
+def _console_level_for_message_type(message_type: str) -> str:
+    if message_type in ("assert", "error"):
+        return "error"
+    if message_type == "warning":
+        return "warning"
+    if message_type in ("count", "dir", "dirxml", "info", "log", "table", "time", "timeEnd"):
+        return "info"
+    if message_type in ("clear", "debug", "endGroup", "profile", "profileEnd", "startGroup", "startGroupCollapsed", "trace"):
+        return "debug"
+    return "info"
+
+
 def _should_include_console_message(level: str, message_type: str) -> bool:
-    severity = {
-        "debug": 0,
-        "log": 1,
-        "info": 1,
-        "warning": 2,
-        "error": 3,
-    }
-    threshold = severity.get(level, severity["info"])
-    return severity.get(message_type, severity["info"]) >= threshold
+    message_level = _console_level_for_message_type(message_type)
+    threshold = level or "info"
+    return _CONSOLE_MESSAGE_LEVELS.index(message_level) <= _CONSOLE_MESSAGE_LEVELS.index(threshold)
 
 
 async def _wait_for_request_response(request: Request) -> None:

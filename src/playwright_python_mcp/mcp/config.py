@@ -60,7 +60,7 @@ class ServerConfig:
     cdp_endpoint: str | None = None
     cdp_headers: dict[str, str] | None = None
     cdp_timeout: int | None = None
-    remote_endpoint: str | None = None
+    remote_endpoint: str | dict[str, Any] | None = None
     remote_headers: dict[str, str] | None = None
     init_scripts: list[Path] = field(default_factory=list)
     init_pages: list[Path] = field(default_factory=list)

@@ -28,7 +28,7 @@ async def _handle_find(context: Context, params: dict[str, Any], response: Respo
             + "\n\n----\n\n".join(snippets)
         )
     else:
-        response.add_text_result("No matches found")
+        response.add_text_result(f"No matches found for {json.dumps(query)}.")
 
 
 def _matcher(*, text: str | None, regex: str | None):

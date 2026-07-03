@@ -89,7 +89,7 @@ def test_browser_close_does_not_prevent_next_tool_call() -> None:
 
         assert backend.closed is True
         assert getattr(close_result, "meta") == {"isClose": True}
-        assert next_result == "### Result\nalive"
+        assert next_result.content[0].text == "### Result\nalive"
 
     asyncio.run(run())
 
@@ -285,6 +285,9 @@ class FakeScreencast:
 class RaisingDisposeContext:
     def __init__(self) -> None:
         self.dispose_called = False
+
+    def browser_context(self) -> None:
+        return None
 
     async def dispose(self) -> None:
         self.dispose_called = True

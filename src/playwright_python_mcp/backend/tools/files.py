@@ -21,7 +21,7 @@ async def _handle_file_upload(context: Context, params: dict[str, Any], response
         file_names = await asyncio.gather(*(response.resolve_client_filename(path) for path in paths))
 
     response.set_include_snapshot()
-    response.add_code(f"await file_chooser.set_files({python_literal(paths or [])})")
+    response.add_code(f"await file_chooser.set_files({python_literal(paths)})")
     tab.clear_modal_state(modal_state)
     file_chooser = modal_state["file_chooser"]
     if paths is not None:

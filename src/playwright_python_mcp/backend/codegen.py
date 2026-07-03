@@ -5,6 +5,8 @@ from typing import Any
 
 
 def python_literal(value: Any) -> str:
+    if value is None:
+        return "None"
     if isinstance(value, bool):
         return "True" if value else "False"
     if isinstance(value, int | float):
