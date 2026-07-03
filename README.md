@@ -230,12 +230,6 @@ npx playwright test --workers=10
 
 The conformance tests are copied from upstream Playwright MCP where practical. Assertions are adapted only for this port's intentional Python snippet syntax or explicit fixture limitations.
 
-Current local result:
-
-```text
-181 passed, 7 skipped
-```
-
 The tag publish workflow runs both the Python gates and the adapted upstream conformance suite before building and publishing.
 
 ## Known Limitations

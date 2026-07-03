@@ -38,11 +38,13 @@ class BrowserBackend:
         *,
         shared_browser_owner: BrowserBackend | None = None,
         close_shared_browser: bool = True,
+        close_browser_context: bool = True,
     ) -> None:
         self._config = config
         self._tools = {tool.name: tool for tool in tools}
         self._shared_browser_owner = shared_browser_owner
         self._close_shared_browser = close_shared_browser
+        self._close_browser_context = close_browser_context
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._playwright_context: PlaywrightBrowserContext | None = None
@@ -152,9 +154,9 @@ class BrowserBackend:
             self._disconnect_listeners_registered = False
 
     def _should_close_browser_context(self) -> bool:
-        if self._playwright_context is not None:
+        if not self._close_browser_context:
             return False
-        if self._shared_browser_owner is not None and not self._config.browser_isolated:
+        if self._playwright_context is not None:
             return False
         return True
 

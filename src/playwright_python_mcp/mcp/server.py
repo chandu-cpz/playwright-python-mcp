@@ -168,6 +168,7 @@ class BackendPool:
                 self._tools,
                 shared_browser_owner=self._shared_owner() if self._uses_shared_browser_owner() else None,
                 close_shared_browser=False,
+                close_browser_context=not self._config.shared_browser_context,
             )
             self._backends[key] = backend
             self._client_count += 1
