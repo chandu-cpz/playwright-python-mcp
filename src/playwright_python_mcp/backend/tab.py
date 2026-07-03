@@ -1,12 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from playwright.async_api import ConsoleMessage, Dialog, Download, Error, FileChooser, Locator, Page, Request
+from playwright.async_api import (
+    ConsoleMessage,
+    Dialog,
+    Download,
+    Error,
+    FileChooser,
+    Locator,
+    Page,
+    Request,
+    Response as PlaywrightResponse,
+)
 
 from .locator_generator import as_python_locator
 from .locator_parser import locator_or_selector_as_selector
@@ -50,12 +61,19 @@ class RequestEntry:
 
 
 @dataclass(slots=True)
+class DocumentStatus:
+    status: int
+    status_text: str
+
+
+@dataclass(slots=True)
 class TabHeader:
     title: str
     url: str
     current: bool
     crashed: bool
     console: dict[str, int]
+    main_document_status: DocumentStatus | None = None
     changed: bool = False
 
 
@@ -90,11 +108,15 @@ class Tab:
         self._recent_event_entries: list[dict[str, Any]] = []
         self._modal_states: list[dict[str, Any]] = []
         self._modal_event = asyncio.Event()
+        self._main_document_status: DocumentStatus | None = None
         self._navigation_index = 0
         self._console_log = LogFile(context, file_prefix="console", title="Console")
+        self._initialized = asyncio.create_task(self._initialize())
         page.on("console", self._on_console_message)
         page.on("pageerror", self._on_page_error)
         page.on("request", self._on_request)
+        page.on("response", self._on_response)
+        page.on("requestfailed", self._on_request_failed)
         page.on("dialog", self._on_dialog)
         page.on("filechooser", self._on_file_chooser)
         page.on("download", self._on_download)
@@ -114,8 +136,32 @@ class Tab:
         await self.page.close()
 
     async def navigate(self, url: str) -> None:
+        await self._initialized
         self._clear_collected_artifacts()
-        await self.page.goto(url, wait_until="domcontentloaded", timeout=self.navigation_timeout)
+        download_event: asyncio.Future[Download] = asyncio.get_running_loop().create_future()
+
+        def download_listener(download: Download) -> None:
+            if not download_event.done():
+                download_event.set_result(download)
+
+        self.page.on("download", download_listener)
+        try:
+            await self.page.goto(url, wait_until="domcontentloaded", timeout=self.navigation_timeout)
+        except Error as exc:
+            if not _might_be_download_error(exc):
+                raise
+            try:
+                await asyncio.wait_for(download_event, timeout=3)
+            except TimeoutError:
+                raise exc from None
+            await asyncio.sleep(0.5)
+            return
+        finally:
+            self.page.remove_listener("download", download_listener)
+        try:
+            await self.page.wait_for_load_state("load", timeout=5000)
+        except Error:
+            pass
 
     async def go_back(self) -> None:
         await self.page.go_back(wait_until="commit", timeout=self.navigation_timeout)
@@ -196,6 +242,7 @@ class Tab:
         await self.wait_for_completion(action)
 
     async def wait_for_completion(self, action):
+        await self._initialized
         if self._modal_states:
             return
         self._modal_event = asyncio.Event()
@@ -208,7 +255,7 @@ class Tab:
             self.page.on("request", request_listener)
             try:
                 result = await action()
-                await asyncio.sleep(0.5)
+                await self.wait_for_timeout(0.5)
             finally:
                 self.page.remove_listener("request", request_listener)
 
@@ -229,7 +276,7 @@ class Tab:
                     task.cancel()
                 for task in done:
                     task.exception()
-                await asyncio.sleep(0.5)
+                await self.wait_for_timeout(0.5)
             return result
 
         action_task = asyncio.create_task(action_and_settle())
@@ -337,6 +384,7 @@ class Tab:
         relative_to: Path | None = None,
         include_aria: bool = True,
     ) -> TabSnapshot:
+        await self._initialized
         if self._modal_states:
             return TabSnapshot(
                 aria_snapshot="",
@@ -358,13 +406,15 @@ class Tab:
         return snapshot
 
     async def header_snapshot(self) -> TabHeader:
-        title = "" if self.crashed else await self.page.title()
+        await self._initialized
+        title = "" if self.crashed else await self._title_or_empty()
         header = TabHeader(
             title=title,
             url=self.page.url,
             current=self.context.current_tab() is self,
             crashed=self.crashed,
             console=self.console_message_count(),
+            main_document_status=self._main_document_status,
         )
         header.changed = header != self._last_header
         self._last_header = TabHeader(
@@ -373,10 +423,12 @@ class Tab:
             current=header.current,
             crashed=header.crashed,
             console=dict(header.console),
+            main_document_status=header.main_document_status,
         )
         return header
 
     async def render_page_markdown(self) -> list[str]:
+        await self._initialized
         lines = [f"- Page URL: {self.page.url}"]
         title = await self.page.title()
         if title:
@@ -443,8 +495,13 @@ class Tab:
     def clear_requests(self) -> None:
         self._requests.clear()
 
-    def clear_console_messages(self) -> None:
+    async def clear_console_messages(self) -> None:
+        await self._initialized
         self._console_messages.clear()
+        with suppress(Error):
+            await self.page.clear_console_messages()
+        with suppress(Error):
+            await self.page.clear_page_errors()
         self._console_log.stop()
         self._console_log = LogFile(self.context, file_prefix="console", title="Console")
 
@@ -461,6 +518,7 @@ class Tab:
         self._navigation_index += 1
         self._requests.clear()
         self._recent_event_entries.clear()
+        self._main_document_status = None
         self._console_log.stop()
         self._console_log = LogFile(self.context, file_prefix="console", title="Console")
 
@@ -495,6 +553,18 @@ class Tab:
         self._requests.append(RequestEntry(request=request))
         self._add_log_entry({"type": "request", "request": request})
 
+    def _on_response(self, response: PlaywrightResponse) -> None:
+        request = response.request
+        if _is_main_frame_navigation(self.page, request) and not _is_redirect(response):
+            self._main_document_status = DocumentStatus(
+                status=response.status,
+                status_text=response.status_text,
+            )
+        self._add_log_entry({"type": "request", "request": request})
+
+    def _on_request_failed(self, request: Request) -> None:
+        self._add_log_entry({"type": "request", "request": request})
+
     def _on_dialog(self, dialog: Dialog) -> None:
         self._modal_states.append(
             {
@@ -521,6 +591,21 @@ class Tab:
         import asyncio
 
         asyncio.create_task(self._download_started(download))
+
+    async def _title_or_empty(self) -> str:
+        if self._modal_states:
+            return ""
+        title_task = asyncio.create_task(self.page.title())
+        modal_task = asyncio.create_task(self._modal_event.wait())
+        done, pending = await asyncio.wait({title_task, modal_task}, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        if modal_task in done:
+            return ""
+        try:
+            return await title_task
+        except Error:
+            return ""
 
     async def _download_started(self, download: Download) -> None:
         from .context import FilenameTemplate
@@ -555,6 +640,30 @@ class Tab:
             return
         asyncio.create_task(self._console_log.append_line(time.time() * 1000, entry.render()))
 
+    async def _initialize(self) -> None:
+        messages = await self.page.console_messages(filter="all")
+        for message in messages:
+            self._on_console_message(message)
+        errors = await self.page.page_errors(filter="all")
+        for error in errors:
+            self._on_page_error(error)
+        requests = await self.page.requests()
+        for request in requests:
+            if request.existing_response is not None or request.failure is not None:
+                self._requests.append(RequestEntry(request=request))
+
+    async def wait_for_timeout(self, seconds: float) -> None:
+        if any(state.get("type") == "dialog" for state in self._modal_states):
+            await asyncio.sleep(seconds)
+            return
+        try:
+            await self.page.evaluate(
+                "(ms) => new Promise((resolve) => setTimeout(resolve, ms))",
+                max(0, int(seconds * 1000)),
+            )
+        except Error:
+            await asyncio.sleep(seconds)
+
 
 def _should_include_console_message(level: str, message_type: str) -> bool:
     severity = {
@@ -575,3 +684,19 @@ async def _wait_for_request_response(request: Request) -> None:
             await response.finished()
     except Error:
         return
+
+
+def _might_be_download_error(error: Error) -> bool:
+    message = str(error)
+    return "net::ERR_ABORTED" in message or "Download is starting" in message
+
+
+def _is_main_frame_navigation(page: Page, request: Request) -> bool:
+    try:
+        return request.is_navigation_request() and request.frame is page.main_frame
+    except Error:
+        return False
+
+
+def _is_redirect(response: PlaywrightResponse) -> bool:
+    return 300 <= response.status <= 399

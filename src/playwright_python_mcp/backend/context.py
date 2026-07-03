@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import os
 import tempfile
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 from urllib.parse import urlparse
 
-from playwright.async_api import BrowserContext
+from playwright.async_api import BrowserContext, Page
 
 from playwright_python_mcp.mcp.config import ServerConfig
 from .codegen import python_literal
@@ -43,6 +44,19 @@ class RouteEntry:
     handler: Callable[[Any], Any] | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class TraceLegend:
+    traces_dir: Path
+    name: str
+
+
+@dataclass(slots=True)
+class VideoRecording:
+    params: dict[str, Any]
+    file_names: list[Path]
+    file_name: Path
+
+
 class Context:
     """Browser-context runtime.
 
@@ -53,19 +67,27 @@ class Context:
     def __init__(self, browser_context: BrowserContext, config: ServerConfig, *, cwd: Path | None = None) -> None:
         self.config = config
         self._browser_context = browser_context
-        self.cwd = cwd or Path.cwd()
+        self._default_cwd = cwd or Path.cwd()
+        self.cwd = self._default_cwd
         self.client_roots: list[Path] | None = None
         self._tabs: list[Tab] = []
         self._current_tab: Tab | None = None
         self._routes: list[RouteEntry] = []
         self.session_log: SessionLog | None = None
-        self.trace_file: Path | None = None
-        self.video_file: Path | None = None
+        self.trace_legend: TraceLegend | None = None
+        self._video_recording: VideoRecording | None = None
 
     async def initialize(self) -> None:
         await self._setup_request_interception()
         for init_script in self.config.init_scripts:
             await self._browser_context.add_init_script(path=init_script)
+        for page in self._browser_context.pages:
+            self._on_page_created(page)
+
+        def handle_page(page: Page) -> None:
+            self._on_page_created(page)
+
+        self._browser_context.on("page", handle_page)
 
     def has_tab(self) -> bool:
         return self._current_tab is not None
@@ -76,6 +98,15 @@ class Context:
     def browser_context(self) -> BrowserContext:
         return self._browser_context
 
+    def configure_client(self, *, roots: list[Path] | None = None, cwd: Path | None = None) -> None:
+        self.client_roots = roots
+        if cwd is not None:
+            self.cwd = cwd
+        elif roots:
+            self.cwd = roots[0]
+        else:
+            self.cwd = self._default_cwd
+
     def current_tab(self) -> Tab | None:
         return self._current_tab
 
@@ -85,6 +116,8 @@ class Context:
         return self._current_tab
 
     async def dispose(self) -> None:
+        with suppress(Exception):
+            await self.stop_video_recording()
         for tab in self._tabs:
             await tab.dispose()
         await self._browser_context.close()
@@ -98,14 +131,11 @@ class Context:
         return self._current_tab
 
     async def new_tab(self) -> Tab:
-        from .tab import Tab
-
         page = await self._browser_context.new_page()
-        tab = Tab(self, page)
-        self._tabs.append(tab)
+        tab = self._tab_for_page(page)
+        if tab is None:
+            tab = self._on_page_created(page)
         self._current_tab = tab
-        page.on("close", lambda _: self._on_page_closed(tab))
-        page.on("crash", lambda _: self._on_page_crashed(tab))
         return tab
 
     async def close_current_tab(self) -> None:
@@ -126,9 +156,27 @@ class Context:
         if index < 0 or index >= len(self._tabs):
             raise ValueError(f"Tab index {index} is out of range")
         self._current_tab = self._tabs[index]
+        await self._current_tab.page.bring_to_front()
 
     async def set_offline(self, offline: bool) -> None:
         await self._browser_context.set_offline(offline)
+
+    async def start_video_recording(self, file_name: Path, params: dict[str, Any]) -> None:
+        if self._video_recording is not None:
+            raise ValueError("Video recording has already been started.")
+        self._video_recording = VideoRecording(params=params, file_names=[], file_name=file_name)
+        for page in self._browser_context.pages:
+            await self._start_page_video(page)
+
+    async def stop_video_recording(self) -> list[Path]:
+        recording = self._video_recording
+        if recording is None:
+            return []
+        for page in self._browser_context.pages:
+            with suppress(Exception):
+                await page.screencast.stop()
+        self._video_recording = None
+        return list(recording.file_names)
 
     def routes(self) -> list[RouteEntry]:
         return list(self._routes)
@@ -239,6 +287,39 @@ class Context:
 
     def _on_page_crashed(self, tab: Tab) -> None:
         tab.crashed = True
+
+    def _on_page_created(self, page: Any) -> Tab:
+        from .tab import Tab
+
+        existing = self._tab_for_page(page)
+        if existing is not None:
+            return existing
+        tab = Tab(self, page)
+        self._tabs.append(tab)
+        if self._current_tab is None:
+            self._current_tab = tab
+        page.on("close", lambda _: self._on_page_closed(tab))
+        page.on("crash", lambda _: self._on_page_crashed(tab))
+        if self._video_recording is not None:
+            import asyncio
+
+            asyncio.create_task(self._start_page_video(page))
+        return tab
+
+    async def _start_page_video(self, page: Page) -> None:
+        recording = self._video_recording
+        if recording is None:
+            return
+        index = len(recording.file_names)
+        file_name = recording.file_name
+        if index:
+            suffix = f"-{index}"
+            file_name = file_name.with_name(f"{file_name.stem}{suffix}{file_name.suffix}")
+        recording.file_names.append(file_name)
+        await page.screencast.start(path=file_name, size=recording.params.get("size"))
+
+    def _tab_for_page(self, page: Any) -> Tab | None:
+        return next((tab for tab in self._tabs if tab.page is page), None)
 
 
 def _is_relative_to(path: Path, parent: Path) -> bool:

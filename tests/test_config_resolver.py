@@ -189,3 +189,20 @@ def test_output_mode_validation() -> None:
         assert "outputMode must be one of" in str(exc)
     else:
         raise AssertionError("Expected output mode validation error")
+
+
+def test_output_dir_rejects_system_directory() -> None:
+    try:
+        load_config(
+            browser=None,
+            caps="config",
+            config_path=None,
+            headless=True,
+            test_id_attribute="data-testid",
+            vision=False,
+            output_dir=Path("/tmp"),
+        )
+    except ValueError as exc:
+        assert "outputDir must not be a system directory" in str(exc)
+    else:
+        raise AssertionError("Expected output dir validation error")

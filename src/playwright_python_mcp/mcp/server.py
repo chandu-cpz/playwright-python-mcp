@@ -82,10 +82,12 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
         handler.__signature__ = Signature(
             parameters=[
                 *signature.parameters.values(),
+                Parameter("_meta", Parameter.KEYWORD_ONLY, annotation=dict[str, Any] | None, default=None),
                 Parameter("ctx", Parameter.KEYWORD_ONLY, annotation=FastMCPContext),
             ]
         )
         handler.__annotations__ = {parameter.name: parameter.annotation for parameter in tool.parameters}
+        handler.__annotations__["_meta"] = dict[str, Any] | None
         handler.__annotations__["ctx"] = FastMCPContext
         handler.__annotations__["return"] = Any
         app.tool(
@@ -139,8 +141,9 @@ def _make_fastmcp_handler(backend: BrowserBackend, tool_name: str):
     @wraps(_tool_handler)
     async def handler(**kwargs: Any):
         ctx = kwargs.pop("ctx", None)
+        meta = kwargs.pop("_meta", None)
         roots = await _list_roots(ctx)
-        return await backend.call_tool(tool_name, kwargs, roots=roots)
+        return await backend.call_tool(tool_name, kwargs, roots=roots, meta=meta)
 
     return handler
 

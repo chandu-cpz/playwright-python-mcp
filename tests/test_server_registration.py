@@ -279,6 +279,44 @@ def test_action_snapshot_respects_none_mode(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
+def test_raw_response_only_emits_result_snapshot_sections(tmp_path: Path) -> None:
+    async def run() -> None:
+        tab = FakeTab(aria_snapshot='- button "Submit" [ref=e1]')
+        context = FakeContext(tab, tmp_path, snapshot_mode="full", output_mode="stdout")
+        response = Response(cast(Context, context), tool_name="browser_click", tool_args={}, raw=True)
+        response.add_text_result("ok")
+        response.add_code("await page.click()")
+        response.set_include_snapshot()
+
+        result = await response.serialize()
+
+        assert isinstance(result, str)
+        assert result.startswith("ok")
+        assert "### Result" not in result
+        assert "Ran Playwright code" not in result
+        assert '- button "Submit" [ref=e1]' in result
+
+    asyncio.run(run())
+
+
+def test_json_response_serializes_sections(tmp_path: Path) -> None:
+    async def run() -> None:
+        tab = FakeTab(aria_snapshot='- button "Submit" [ref=e1]')
+        context = FakeContext(tab, tmp_path, snapshot_mode="full", output_mode="stdout")
+        response = Response(cast(Context, context), tool_name="browser_click", tool_args={}, json_mode=True)
+        response.add_text_result("ok")
+        response.set_include_snapshot()
+
+        result = await response.serialize()
+
+        assert isinstance(result, str)
+        assert '"result": "ok"' in result
+        assert '"snapshot": "- button \\"Submit\\" [ref=e1]"' in result
+        assert "### Result" not in result
+
+    asyncio.run(run())
+
+
 def test_response_includes_paused_debugger_section(tmp_path: Path) -> None:
     async def run() -> None:
         context = FakeContext(FakeTab(), tmp_path)

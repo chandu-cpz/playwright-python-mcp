@@ -92,7 +92,7 @@ def _selector_parts(node: ast.AST, *, test_id_attribute: str) -> list[str]:
     if method == "get_by_title":
         return [*parts, f"internal:attr=[title={_selector_value(_required_arg_value(node, method), exact=_keyword_bool(node, 'exact'))}]"]
     if method == "filter":
-        filter_parts = _filter_parts(node)
+        filter_parts = _filter_parts(node, test_id_attribute=test_id_attribute)
         return [*parts, *filter_parts]
     if method == "nth":
         if not node.args or not isinstance(node.args[0], ast.Constant) or not isinstance(node.args[0].value, int):
@@ -106,7 +106,7 @@ def _selector_parts(node: ast.AST, *, test_id_attribute: str) -> list[str]:
     raise ValueError(f"Unsupported locator method: {method}")
 
 
-def _filter_parts(node: ast.Call) -> list[str]:
+def _filter_parts(node: ast.Call, *, test_id_attribute: str) -> list[str]:
     parts: list[str] = []
     for keyword in node.keywords:
         if keyword.arg == "visible":
@@ -117,9 +117,9 @@ def _filter_parts(node: ast.Call) -> list[str]:
         elif keyword.arg == "has_not_text":
             parts.append(f"internal:has-not-text={_selector_value(keyword.value, exact=False)}")
         elif keyword.arg == "has":
-            parts.append(f"internal:has={_nested_selector(keyword.value)}")
+            parts.append(f"internal:has={_nested_selector(keyword.value, test_id_attribute=test_id_attribute)}")
         elif keyword.arg == "has_not":
-            parts.append(f"internal:has-not={_nested_selector(keyword.value)}")
+            parts.append(f"internal:has-not={_nested_selector(keyword.value, test_id_attribute=test_id_attribute)}")
         else:
             raise ValueError(f"Unsupported filter option: {keyword.arg}")
     return parts
@@ -132,8 +132,8 @@ def _nested_selector_arg(node: ast.Call, *, test_id_attribute: str) -> str:
     return json.dumps(selector)
 
 
-def _nested_selector(node: ast.AST) -> str:
-    selector = " >> ".join(_selector_parts(node, test_id_attribute="data-testid"))
+def _nested_selector(node: ast.AST, *, test_id_attribute: str) -> str:
+    selector = " >> ".join(_selector_parts(node, test_id_attribute=test_id_attribute))
     return json.dumps(selector)
 
 

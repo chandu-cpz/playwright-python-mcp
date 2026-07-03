@@ -27,7 +27,7 @@ async def _handle_console_messages(context: Context, params: dict[str, Any], res
 
 async def _handle_console_clear(context: Context, _params: dict[str, Any], _response: Response) -> None:
     tab = await context.ensure_tab()
-    tab.clear_console_messages()
+    await tab.clear_console_messages()
 
 
 console_tools = [

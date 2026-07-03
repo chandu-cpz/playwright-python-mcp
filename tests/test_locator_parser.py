@@ -14,6 +14,15 @@ def test_python_chained_locator_to_selector() -> None:
     assert selector == 'article >> internal:has="internal:text=\\"Submit\\"i"'
 
 
+def test_python_nested_test_id_uses_custom_attribute() -> None:
+    selector = locator_or_selector_as_selector(
+        'locator("article").filter(has=get_by_test_id("submit"))',
+        test_id_attribute="data-pw",
+    )
+
+    assert selector == 'article >> internal:has="internal:testid=[data-pw=\\"submit\\"s]"'
+
+
 def test_python_frame_locator_to_selector() -> None:
     selector = locator_or_selector_as_selector('page.locator("iframe").content_frame.get_by_role("heading", name="Inner")')
 

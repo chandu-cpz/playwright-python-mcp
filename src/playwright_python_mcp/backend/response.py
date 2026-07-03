@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from io import BytesIO
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -32,11 +33,20 @@ class ResolvedFile:
 
 
 class Response:
-    def __init__(self, context: Context, *, tool_name: str, tool_args: dict[str, object]) -> None:
+    def __init__(
+        self,
+        context: Context,
+        *,
+        tool_name: str,
+        tool_args: dict[str, object],
+        relative_to: Path | None = None,
+        raw: bool = False,
+        json_mode: bool = False,
+    ) -> None:
         self._context = context
         self.tool_name = tool_name
         self.tool_args = tool_args
-        self._client_workspace = context.cwd
+        self._client_workspace = relative_to or context.cwd
         self._results: list[str] = []
         self._errors: list[str] = []
         self._code: list[str] = []
@@ -44,6 +54,8 @@ class Response:
         self._image_results: list[tuple[bytes, str]] = []
         self._written_files: set[Path] = set()
         self._is_close = False
+        self._raw = json_mode or raw
+        self._json = json_mode
 
     def add_text_result(self, text: str) -> None:
         self._results.append(text)
@@ -194,12 +206,16 @@ class Response:
             sections.append(("Paused", paused, None, False))
 
         await self._enforce_output_budget()
+        sections = self._filter_sections(sections)
         text = self._serialize_sections(sections)
         is_error = any(section[3] for section in sections)
         if is_error:
             return ToolResult(content=text, is_error=True, meta=_result_meta(self._is_close))
         if self._image_results and self._context.config.image_responses != "omit":
-            return ToolResult(content=[TextContent(type="text", text=text), *self._image_content()])
+            return ToolResult(
+                content=[TextContent(type="text", text=text), *self._image_content()],
+                meta=_result_meta(self._is_close),
+            )
         if self._is_close:
             return ToolResult(content=text, meta=_result_meta(True))
         return text
@@ -220,9 +236,30 @@ class Response:
         return content
 
     def _serialize_sections(self, sections: list[tuple[str, list[str], str | None, bool]]) -> str:
+        if self._json:
+            payload: dict[str, object] = {}
+            if any(section[3] for section in sections):
+                payload["isError"] = True
+            for title, content, _codeframe, _is_error in sections:
+                if not content:
+                    continue
+                key = title.lower()
+                if key == "snapshot":
+                    match = content[0].strip().removeprefix("- [Snapshot](").removesuffix(")")
+                    if match != content[0]:
+                        payload[key] = {"file": match}
+                    else:
+                        payload[key] = "\n".join(content)
+                else:
+                    payload[key] = "\n".join(content)
+            return self._context.redact_secrets(json.dumps(payload, indent=2))
+
         rendered: list[str] = []
         for title, content, codeframe, _is_error in sections:
             if not content:
+                continue
+            if self._raw:
+                rendered.extend(content)
                 continue
             rendered.append(f"### {title}")
             if codeframe:
@@ -231,6 +268,15 @@ class Response:
             if codeframe:
                 rendered.append("```")
         return "\n".join(self._context.redact_secrets("\n".join(rendered)).splitlines())
+
+    def _filter_sections(
+        self,
+        sections: list[tuple[str, list[str], str | None, bool]],
+    ) -> list[tuple[str, list[str], str | None, bool]]:
+        if not self._raw:
+            return sections
+        allowed = {"Error", "Result", "Snapshot"}
+        return [section for section in sections if section[0] in allowed]
 
     def _render_events(self, tab_snapshot) -> list[str]:
         if tab_snapshot is None:
@@ -320,6 +366,10 @@ def render_tab_markdown(tab: TabHeader) -> list[str]:
     lines = [f"- Page URL: {tab.url}"]
     if tab.title:
         lines.append(f"- Page Title: {tab.title}")
+    if tab.main_document_status is not None and not (200 <= tab.main_document_status.status <= 299):
+        lines.append(
+            f"- HTTP status: {tab.main_document_status.status} {tab.main_document_status.status_text}"
+        )
     if tab.crashed:
         lines.append("- Page status: crashed")
     if tab.console["errors"] or tab.console["warnings"]:

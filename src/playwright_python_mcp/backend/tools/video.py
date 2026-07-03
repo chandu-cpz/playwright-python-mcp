@@ -11,25 +11,26 @@ ActionCursor = Literal["none", "pointer"]
 
 
 async def _handle_start_video(context: Context, params: dict[str, Any], response: Response) -> None:
-    tab = await context.ensure_tab()
+    await context.ensure_tab()
     resolved_file = await response.resolve_client_file(
         FilenameTemplate(prefix="video", ext="webm", suggested_filename=params.get("filename")),
         "Video",
     )
-    context.video_file = resolved_file.file_name
-    await tab.page.screencast.start(path=resolved_file.file_name, size=params.get("size"))
+    await context.start_video_recording(resolved_file.file_name, {"size": params.get("size")})
     response.add_text_result("Video recording started.")
 
 
 async def _handle_stop_video(context: Context, _params: dict[str, Any], response: Response) -> None:
-    tab = context.current_tab_or_die()
-    if context.video_file is None:
+    file_names = await context.stop_video_recording()
+    if not file_names:
         response.add_text_result("No videos were recorded.")
         return
-    video_file = context.video_file
-    context.video_file = None
-    await tab.page.screencast.stop()
-    response.add_file_link("Video", video_file)
+    for file_name in file_names:
+        resolved_file = await response.resolve_client_file(
+            FilenameTemplate(prefix="video", ext="webm", suggested_filename=str(file_name)),
+            "Video",
+        )
+        await response.add_file_result(resolved_file, None)
 
 
 async def _handle_video_chapter(context: Context, params: dict[str, Any], response: Response) -> None:

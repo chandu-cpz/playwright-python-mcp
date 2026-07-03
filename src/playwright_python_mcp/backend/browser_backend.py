@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import sys
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -38,53 +40,88 @@ class BrowserBackend:
         self._extension_relay: CDPRelayServer | None = None
         self._context: Context | None = None
         self._session_log: SessionLog | None = None
+        self._disconnected = False
+        self._disconnect_listeners_registered = False
 
     def has_page(self) -> bool:
         return self._context is not None and self._context.has_tab()
 
-    async def call_tool(self, name: str, args: dict[str, Any], *, roots: list[str] | None = None) -> str | ToolResult:
+    async def call_tool(
+        self,
+        name: str,
+        args: dict[str, Any],
+        *,
+        roots: list[str] | None = None,
+        meta: dict[str, Any] | None = None,
+    ) -> str | ToolResult:
         tool = self._tools.get(name)
         if tool is None:
-            return ToolResult(content=f'### Error\nTool "{name}" not found', is_error=True)
+            return _format_error(f'Tool "{name}" not found', json_mode=bool(meta and meta.get("json")))
+
+        client_cwd = _client_cwd(meta=meta, roots=roots)
 
         try:
-            context = await self._ensure_context()
-            if roots is not None:
-                from pathlib import Path
-
-                context.client_roots = [Path(root) for root in roots]
-            response = Response(context, tool_name=name, tool_args=args)
+            context = await self._ensure_context(cwd=client_cwd, roots=roots)
+            response = Response(
+                context,
+                tool_name=name,
+                tool_args=args,
+                relative_to=client_cwd,
+                raw=bool(meta and meta.get("raw")),
+                json_mode=bool(meta and meta.get("json")),
+            )
             if _blocks_on_modal_state(context, tool):
                 response.add_error(f'Error: Tool "{name}" does not handle the modal state.')
-                return await response.serialize()
+                result = await response.serialize()
+                if self._disconnected:
+                    result = _attach_close_marker(result)
+                    await self.close()
+                return result
             await tool.handler(context, args, response)
             result = await response.serialize()
             if self._session_log is not None:
                 await self._session_log.log_response(name, args, result)
         except ValueError as exc:
-            return ToolResult(content=f"### Error\n{exc}", is_error=True)
+            result = _format_error(str(exc), json_mode=bool(meta and meta.get("json")))
+            if self._disconnected:
+                result = _attach_close_marker(result)
+                await self.close()
+            return result
         except Exception as exc:
-            return ToolResult(content=f"### Error\n{exc}", is_error=True)
+            result = _format_error(str(exc), json_mode=bool(meta and meta.get("json")))
+            if self._disconnected:
+                result = _attach_close_marker(result)
+                await self.close()
+            return result
 
-        if response.is_close:
+        if response.is_close or self._disconnected:
+            result = _attach_close_marker(result)
             await self.close()
         return result
 
     async def close(self) -> None:
-        if self._context is not None:
-            await self._context.dispose()
-        if self._browser is not None:
-            await self._browser.close()
-        if self._extension_relay is not None:
-            await self._extension_relay.stop()
-        if self._playwright is not None:
-            await self._playwright.stop()
-        self._playwright = None
-        self._browser = None
-        self._playwright_context = None
-        self._extension_relay = None
-        self._context = None
-        self._session_log = None
+        try:
+            if self._context is not None:
+                with suppress(Exception):
+                    await self._context.dispose()
+            if self._browser is not None:
+                with suppress(Exception):
+                    await self._browser.close()
+            if self._extension_relay is not None:
+                with suppress(Exception):
+                    await self._extension_relay.stop()
+            if self._playwright is not None:
+                with suppress(Exception):
+                    await self._playwright.stop()
+        finally:
+            self._playwright = None
+            self._browser = None
+            self._playwright_context = None
+            self._extension_relay = None
+            self._context = None
+            self._session_log = None
+            self._disconnected = False
+            self._disconnect_listeners_registered = False
 
     async def render_page_markdown(self) -> list[str]:
         tab = await self._ensure_tab()
@@ -101,41 +138,52 @@ class BrowserBackend:
         return await tab.capture_snapshot(target=target, depth=depth, boxes=boxes)
 
     async def _ensure_tab(self):
-        context = await self._ensure_context()
+        cwd = self._context.cwd if self._context is not None else Path.cwd()
+        context = await self._ensure_context(cwd=cwd, roots=None)
         return await context.ensure_tab()
 
-    async def _ensure_context(self) -> Context:
+    async def _ensure_context(self, *, cwd: Path, roots: list[str] | None) -> Context:
         if self._context is not None:
+            self._context.configure_client(
+                roots=[Path(root) for root in roots] if roots is not None else None,
+                cwd=cwd,
+            )
             return self._context
         if self._playwright is None:
             self._playwright = await async_playwright().start()
             self._playwright.selectors.set_test_id_attribute(self._config.test_id_attribute)
         if self._browser is None and self._playwright_context is None:
-            self._browser = await self._launch_browser()
+            self._browser = await self._launch_browser(cwd)
         if self._playwright_context is not None:
             browser_context = self._playwright_context
         else:
             assert self._browser is not None
             browser_context = await self._browser.new_context(**self._config.browser_context_options)
+        self._register_disconnect_listeners(browser_context)
         if self._config.action_timeout is not None:
             browser_context.set_default_timeout(self._config.action_timeout)
         if self._config.navigation_timeout is not None:
             browser_context.set_default_navigation_timeout(self._config.navigation_timeout)
-        self._context = Context(browser_context, self._config)
+        self._context = Context(browser_context, self._config, cwd=cwd)
+        self._context.configure_client(
+            roots=[Path(root) for root in roots] if roots is not None else None,
+            cwd=cwd,
+        )
         await self._context.initialize()
         if self._config.save_session:
             self._session_log = await SessionLog.create(self._context)
             self._context.session_log = self._session_log
         return self._context
 
-    async def _launch_browser(self) -> Browser:
+    async def _launch_browser(self, cwd: Path | None = None) -> Browser:
+        cwd = cwd or Path.cwd()
         assert self._playwright is not None
         if self._config.cdp_endpoint:
             self._browser = await self._playwright.chromium.connect_over_cdp(
                 self._config.cdp_endpoint,
                 headers=self._config.cdp_headers,
                 timeout=self._config.cdp_timeout,
-                artifacts_dir=self._traces_dir(),
+                artifacts_dir=self._traces_dir(cwd),
             )
             return self._browser
         if self._config.remote_endpoint:
@@ -178,7 +226,7 @@ class BrowserBackend:
         if not headless and os.name == "posix" and not os.environ.get("DISPLAY"):
             headless = True
         launch_options["headless"] = headless
-        launch_options.setdefault("traces_dir", self._traces_dir())
+        launch_options.setdefault("traces_dir", self._traces_dir(cwd))
         launch_options["handle_sigint"] = False
         launch_options["handle_sigterm"] = False
 
@@ -186,7 +234,7 @@ class BrowserBackend:
         if self._config.browser_user_data_dir is not None and self._config.browser_isolated:
             raise ValueError("Browser userDataDir is not supported in isolated mode.")
         if not self._config.browser_isolated:
-            user_data_dir = self._config.browser_user_data_dir or await self._default_user_data_dir()
+            user_data_dir = self._config.browser_user_data_dir or await self._default_user_data_dir(cwd)
             if await _is_profile_locked_5_times(user_data_dir):
                 raise ValueError(
                     f"Browser is already in use for {user_data_dir}, "
@@ -206,16 +254,31 @@ class BrowserBackend:
             return browser
         return await browser_type.launch(**launch_options)
 
-    def _traces_dir(self) -> Path:
-        return _output_dir(self._config, Path.cwd()) / "traces"
+    def _traces_dir(self, cwd: Path | None = None) -> Path:
+        cwd = cwd or Path.cwd()
+        return _output_dir(self._config, cwd) / "traces"
 
-    async def _default_user_data_dir(self) -> Path:
+    async def _default_user_data_dir(self, cwd: Path | None = None) -> Path:
+        cwd = cwd or Path.cwd()
         cache_root = _cache_root() / "ms-playwright-mcp"
         browser_token = self._config.browser_channel or self._config.browser_name
-        cwd_hash = hashlib.sha256(str(Path.cwd()).encode()).hexdigest()[:7]
+        cwd_hash = hashlib.sha256(str(cwd).encode()).hexdigest()[:7]
         user_data_dir = cache_root / f"mcp-{browser_token}-{cwd_hash}"
         user_data_dir.mkdir(parents=True, exist_ok=True)
         return user_data_dir
+
+    def _register_disconnect_listeners(self, browser_context: PlaywrightBrowserContext) -> None:
+        if self._disconnect_listeners_registered:
+            return
+
+        def mark_disconnected(*_args: Any) -> None:
+            self._disconnected = True
+
+        browser_context.on("close", mark_disconnected)
+        browser = browser_context.browser
+        if browser is not None:
+            browser.on("disconnected", mark_disconnected)
+        self._disconnect_listeners_registered = True
 
 
 def _blocks_on_modal_state(context: Context, tool: Tool) -> bool:
@@ -235,6 +298,29 @@ def _output_dir(config: ServerConfig, cwd: Path) -> Path:
     if _is_system_directory(cwd) or not os.access(cwd, os.W_OK):
         return Path(tempfile.gettempdir()) / base_name
     return cwd / base_name
+
+
+def _client_cwd(*, meta: dict[str, Any] | None, roots: list[str] | None) -> Path:
+    if meta and meta.get("cwd"):
+        return Path(str(meta["cwd"]))
+    if roots:
+        return Path(roots[0])
+    return Path.cwd()
+
+
+def _format_error(message: str, *, json_mode: bool) -> ToolResult:
+    if json_mode:
+        return ToolResult(content=json.dumps({"isError": True, "error": message}, indent=2), is_error=True)
+    return ToolResult(content=f"### Error\n{message}", is_error=True)
+
+
+def _attach_close_marker(result: str | ToolResult) -> ToolResult:
+    if isinstance(result, ToolResult):
+        meta = dict(getattr(result, "meta", None) or {})
+        meta["isClose"] = True
+        result.meta = meta
+        return result
+    return ToolResult(content=result, meta={"isClose": True})
 
 
 def _cache_root() -> Path:

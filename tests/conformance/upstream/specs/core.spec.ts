@@ -30,6 +30,20 @@ test('browser_navigate', async ({ client, server }) => {
   });
 });
 
+test('browser_navigate renders bad HTTP status', async ({ client, server }) => {
+  server.setRoute('/not-found', (req, res) => {
+    res.writeHead(404, { 'Content-Type': 'text/html' });
+    res.end('<title>Missing</title><body>Missing</body>');
+  });
+
+  expect(await client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.PREFIX + '/not-found' },
+  })).toHaveResponse({
+    page: expect.stringContaining('- HTTP status: 404 Not Found'),
+  });
+});
+
 test('browser_navigate blocks file:// URLs by default', async ({ client }) => {
   expect(await client.callTool({
     name: 'browser_navigate',
@@ -109,6 +123,27 @@ test('browser_navigate_back does not time out when load never fires', async ({ c
   })).toHaveResponse({
     code: `await page.go_back()`,
     page: expect.stringContaining(`- Page URL: ${server.PREFIX}/page-a`),
+  });
+});
+
+test('browser_close allows the next navigation to relaunch', async ({ client, server }) => {
+  await client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.HELLO_WORLD },
+  });
+
+  expect(await client.callTool({
+    name: 'browser_close',
+    arguments: {},
+  })).toHaveResponse({
+    code: `await page.close()`,
+  });
+
+  expect(await client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.HELLO_WORLD },
+  })).toHaveResponse({
+    page: expect.stringContaining(`- Page URL: ${server.HELLO_WORLD}`),
   });
 });
 

@@ -137,8 +137,7 @@ test('clicking on download link emits download', async ({ startClient, server },
 - Downloaded file test.txt to "output${path.sep}test.txt"`);
 });
 
-test('navigating to download link emits download', async ({ startClient, server, mcpBrowser }, testInfo) => {
-  test.skip(mcpBrowser !== 'chromium', 'This test is racy');
+test('navigating to download link emits download', async ({ startClient, server }, testInfo) => {
   const { client } = await startClient({
     config: { outputDir: testInfo.outputPath('output') },
   });

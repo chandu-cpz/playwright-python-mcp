@@ -39,11 +39,16 @@ test('check that trace is saved with browser_start_tracing', async ({ startClien
   expect(await client.callTool({
     name: 'browser_stop_tracing',
   })).toHaveResponse({
-    result: expect.stringMatching(/Trace.*trace-\d+.zip/)
+    result: expect.stringMatching(/Trace.*trace-\d+.trace/)
   });
 
-  const files = await fs.promises.readdir(outputDir);
-  expect(files).toContainEqual(expect.stringMatching(/trace-\d+\.zip/));
+  const files = await fs.promises.readdir(path.join(outputDir, 'traces'));
+  expect(files).toEqual([
+    'resources',
+    expect.stringMatching(/trace-\d+\.network/),
+    expect.stringMatching(/trace-\d+\.stacks/),
+    expect.stringMatching(/trace-\d+\.trace/),
+  ]);
 });
 
 test('check that trace is saved with browser_start_tracing (no output dir)', async ({ startClient, server }, testInfo) => {
@@ -67,11 +72,16 @@ test('check that trace is saved with browser_start_tracing (no output dir)', asy
   expect(await client.callTool({
     name: 'browser_stop_tracing',
   })).toHaveResponse({
-    result: expect.stringMatching(/Trace.*trace-\d+.zip/)
+    result: expect.stringMatching(/Trace.*trace-\d+.trace/)
   });
 
-  const files = await fs.promises.readdir(testInfo.outputPath('.playwright-mcp'));
-  expect(files).toContainEqual(expect.stringMatching(/trace-\d+\.zip/));
+  const files = await fs.promises.readdir(testInfo.outputPath('.playwright-mcp', 'traces'));
+  expect(files).toEqual([
+    'resources',
+    expect.stringMatching(/trace-\d+\.network/),
+    expect.stringMatching(/trace-\d+\.stacks/),
+    expect.stringMatching(/trace-\d+\.trace/),
+  ]);
 });
 
 test('browser_stop_tracing without start returns error', async ({ startClient }) => {

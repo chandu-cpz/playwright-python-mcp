@@ -136,6 +136,53 @@ test('close tab', async ({ client }) => {
   });
 });
 
+test('tracks browser context pages opened outside browser_tabs', async ({ client }) => {
+  await client.callTool({
+    name: 'browser_navigate',
+    arguments: {
+      url: `data:text/html,<title>Main</title><body>Main body</body>`,
+    },
+  });
+
+  await client.callTool({
+    name: 'browser_run_code_unsafe',
+    arguments: {
+      code: `popup = await page.context.new_page()
+await popup.goto("data:text/html,<title>Popup</title><body>Popup body</body>")`,
+    },
+  });
+
+  await expect.poll(async () => {
+    const result = await client.callTool({
+      name: 'browser_tabs',
+      arguments: {
+        action: 'list',
+      },
+    });
+    return result.content[0].type === 'text' ? result.content[0].text : '';
+  }).toContain('[Popup](data:text/html,<title>Popup</title><body>Popup body</body>)');
+
+  expect(await client.callTool({
+    name: 'browser_tabs',
+    arguments: {
+      action: 'select',
+      index: 1,
+    },
+  })).toHaveResponse({
+    result: expect.stringContaining('- 1: (current) [Popup](data:text/html,<title>Popup</title><body>Popup body</body>)'),
+  });
+
+  expect(await client.callTool({
+    name: 'browser_tabs',
+    arguments: {
+      action: 'close',
+      index: 1,
+    },
+  })).toHaveResponse({
+    result: expect.not.stringContaining('[Popup]'),
+  });
+});
+
 test.skip('reuse first tab when navigating', async () => {
   // Requires CDP CLI parity; tracked in Slice 15.
 });

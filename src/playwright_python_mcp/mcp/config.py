@@ -307,6 +307,8 @@ def _validate_and_complete(config: dict[str, Any]) -> None:
         raise ValueError('console.level must be one of "error", "warning", "info", "debug"')
     if config.get("outputMode") not in {None, "file", "stdout"}:
         raise ValueError('outputMode must be one of "file" or "stdout"')
+    if config.get("outputDir") and _is_system_directory(Path(config["outputDir"])):
+        raise ValueError(f'outputDir must not be a system directory: {config["outputDir"]}')
 
 
 def _server_config_from_merged(config: dict[str, Any]) -> ServerConfig:
@@ -496,6 +498,11 @@ def _resolution(value: str | None) -> dict[str, int] | None:
     delimiter = "x" if "x" in value else ","
     width, height = (int(part) for part in value.split(delimiter, 1))
     return {"width": width, "height": height}
+
+
+def _is_system_directory(path: Path) -> bool:
+    resolved = path.resolve()
+    return resolved in {Path("/"), Path("/tmp"), Path("/var"), Path("/usr"), Path("/bin"), Path("/etc")}
 
 
 def _dotenv(path: Path) -> dict[str, str]:
