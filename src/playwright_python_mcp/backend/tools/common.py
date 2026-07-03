@@ -5,7 +5,7 @@ from typing import Any
 from playwright_python_mcp.backend.codegen import python_dict
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
-from playwright_python_mcp.backend.tool import Tool, param
+from playwright_python_mcp.backend.tool import Tool, param, tab_tool
 
 
 async def _handle_resize(context: Context, params: dict[str, Any], response: Response) -> None:
@@ -23,7 +23,7 @@ async def _handle_close(_context: Context, _params: dict[str, Any], response: Re
 
 
 common_tools = [
-    Tool(
+    tab_tool(
         name="browser_resize",
         capability="core",
         parameters=(param("width", int), param("height", int)),

@@ -5,7 +5,7 @@ from typing import Any, Literal
 from playwright_python_mcp.backend.codegen import python_literal
 from playwright_python_mcp.backend.context import Context, FilenameTemplate
 from playwright_python_mcp.backend.response import Response
-from playwright_python_mcp.backend.tool import Tool, param
+from playwright_python_mcp.backend.tool import param, tab_tool
 
 ImageType = Literal["png", "jpeg"]
 ImageScale = Literal["css", "device"]
@@ -66,7 +66,7 @@ async def _handle_take_screenshot(context: Context, params: dict[str, Any], resp
 
 
 screenshot_tools = [
-    Tool(
+    tab_tool(
         name="browser_take_screenshot",
         capability="core",
         tool_type="readOnly",

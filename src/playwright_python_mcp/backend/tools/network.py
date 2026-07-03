@@ -9,7 +9,7 @@ from playwright.async_api import Request, Response as PlaywrightResponse
 from playwright_python_mcp.backend.codegen import python_literal
 from playwright_python_mcp.backend.context import Context, FilenameTemplate
 from playwright_python_mcp.backend.response import Response
-from playwright_python_mcp.backend.tool import Tool, param
+from playwright_python_mcp.backend.tool import Tool, param, tab_tool
 
 RequestPart = Literal["request-headers", "request-body", "response-headers", "response-body"]
 NetworkState = Literal["online", "offline"]
@@ -273,7 +273,7 @@ def _truncate_data_url(url: str) -> str:
 
 
 network_tools = [
-    Tool(
+    tab_tool(
         name="browser_network_requests",
         capability="core",
         tool_type="readOnly",
@@ -284,7 +284,7 @@ network_tools = [
         ),
         handler=_handle_network_requests,
     ),
-    Tool(
+    tab_tool(
         name="browser_network_request",
         capability="core",
         tool_type="readOnly",
@@ -295,7 +295,7 @@ network_tools = [
         ),
         handler=_handle_network_request,
     ),
-    Tool(
+    tab_tool(
         name="browser_network_clear",
         capability="core",
         tool_type="readOnly",

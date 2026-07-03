@@ -120,10 +120,14 @@ class BrowserBackend:
         return result
 
     async def close(self) -> None:
+        browser_context = self._context.browser_context() if self._context is not None else None
         try:
             if self._context is not None:
                 with suppress(Exception):
                     await self._context.dispose()
+            if browser_context is not None and self._should_close_browser_context():
+                with suppress(Exception):
+                    await browser_context.close()
             if self._browser is not None and self._shared_browser_owner is None:
                 with suppress(Exception):
                     await self._browser.close()
@@ -146,6 +150,13 @@ class BrowserBackend:
             self._disconnected = False
             self._closed = True
             self._disconnect_listeners_registered = False
+
+    def _should_close_browser_context(self) -> bool:
+        if self._playwright_context is not None:
+            return False
+        if self._shared_browser_owner is not None and not self._config.browser_isolated:
+            return False
+        return True
 
     async def render_page_markdown(self) -> list[str]:
         tab = await self._ensure_tab()

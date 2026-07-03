@@ -5,7 +5,7 @@ from typing import Any, Literal
 from playwright_python_mcp.backend.codegen import python_literal
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
-from playwright_python_mcp.backend.tool import Tool, param
+from playwright_python_mcp.backend.tool import param, tab_tool
 
 StorageKind = Literal["localStorage", "sessionStorage"]
 
@@ -73,30 +73,36 @@ def _with_kind(handler, kind: StorageKind):
 
 
 webstorage_tools = [
-    Tool("browser_localstorage_list", "storage", _with_kind(_handle_list, "localStorage"), tool_type="readOnly"),
-    Tool("browser_localstorage_get", "storage", _with_kind(_handle_get, "localStorage"), (param("key", str),), tool_type="readOnly"),
-    Tool(
+    tab_tool("browser_localstorage_list", "storage", _with_kind(_handle_list, "localStorage"), tool_type="readOnly"),
+    tab_tool(
+        "browser_localstorage_get",
+        "storage",
+        _with_kind(_handle_get, "localStorage"),
+        (param("key", str),),
+        tool_type="readOnly",
+    ),
+    tab_tool(
         "browser_localstorage_set",
         "storage",
         _with_kind(_handle_set, "localStorage"),
         (param("key", str), param("value", str)),
     ),
-    Tool("browser_localstorage_delete", "storage", _with_kind(_handle_delete, "localStorage"), (param("key", str),)),
-    Tool("browser_localstorage_clear", "storage", _with_kind(_handle_clear, "localStorage")),
-    Tool("browser_sessionstorage_list", "storage", _with_kind(_handle_list, "sessionStorage"), tool_type="readOnly"),
-    Tool(
+    tab_tool("browser_localstorage_delete", "storage", _with_kind(_handle_delete, "localStorage"), (param("key", str),)),
+    tab_tool("browser_localstorage_clear", "storage", _with_kind(_handle_clear, "localStorage")),
+    tab_tool("browser_sessionstorage_list", "storage", _with_kind(_handle_list, "sessionStorage"), tool_type="readOnly"),
+    tab_tool(
         "browser_sessionstorage_get",
         "storage",
         _with_kind(_handle_get, "sessionStorage"),
         (param("key", str),),
         tool_type="readOnly",
     ),
-    Tool(
+    tab_tool(
         "browser_sessionstorage_set",
         "storage",
         _with_kind(_handle_set, "sessionStorage"),
         (param("key", str), param("value", str)),
     ),
-    Tool("browser_sessionstorage_delete", "storage", _with_kind(_handle_delete, "sessionStorage"), (param("key", str),)),
-    Tool("browser_sessionstorage_clear", "storage", _with_kind(_handle_clear, "sessionStorage")),
+    tab_tool("browser_sessionstorage_delete", "storage", _with_kind(_handle_delete, "sessionStorage"), (param("key", str),)),
+    tab_tool("browser_sessionstorage_clear", "storage", _with_kind(_handle_clear, "sessionStorage")),
 ]

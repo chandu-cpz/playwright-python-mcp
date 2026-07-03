@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from io import BytesIO
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+import re
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastmcp.tools.base import ToolResult
 from mcp.types import ImageContent, TextContent
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
 class SnapshotRequest:
     mode: Literal["none", "full", "explicit"]
     target: str | None = None
+    root: Any | None = None
     depth: int | None = None
     boxes: bool | None = None
     file_name: str | None = None
@@ -122,6 +124,7 @@ class Response:
         self,
         *,
         target: str | None = None,
+        root: Any | None = None,
         depth: int | None = None,
         boxes: bool | None = None,
         file_name: str | None = None,
@@ -129,6 +132,7 @@ class Response:
         self._snapshot_request = SnapshotRequest(
             mode="explicit",
             target=target,
+            root=root,
             depth=depth,
             boxes=boxes,
             file_name=file_name,
@@ -141,7 +145,7 @@ class Response:
     def is_close(self) -> bool:
         return self._is_close
 
-    async def serialize(self) -> str | ToolResult:
+    async def serialize(self) -> ToolResult:
         sections: list[tuple[str, list[str], str | None, bool]] = []
 
         if self._errors:
@@ -157,6 +161,7 @@ class Response:
             request = self._snapshot_request
             tab_snapshot = await tab.capture_tab_snapshot(
                 target=request.target if request else None,
+                root=request.root if request else None,
                 depth=request.depth if request else None,
                 boxes=request.boxes if request else None,
                 relative_to=self._client_workspace,
@@ -216,9 +221,7 @@ class Response:
                 content=[TextContent(type="text", text=text), *self._image_content()],
                 meta=_result_meta(self._is_close),
             )
-        if self._is_close:
-            return ToolResult(content=text, meta=_result_meta(True))
-        return text
+        return ToolResult(content=text, meta=_result_meta(self._is_close))
 
     def _image_content(self) -> list[ImageContent]:
         import base64
@@ -245,9 +248,9 @@ class Response:
                     continue
                 key = title.lower()
                 if key == "snapshot":
-                    match = content[0].strip().removeprefix("- [Snapshot](").removesuffix(")")
-                    if match != content[0]:
-                        payload[key] = {"file": match}
+                    match = re.match(r"^- \[Snapshot\]\(([^)]+)\)$", content[0].strip())
+                    if match:
+                        payload[key] = {"file": match.group(1)}
                     else:
                         payload[key] = "\n".join(content)
                 else:

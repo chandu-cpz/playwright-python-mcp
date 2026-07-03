@@ -6,7 +6,7 @@ from playwright_python_mcp.backend.codegen import python_literal
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
 from playwright_python_mcp.backend.tab import Button
-from playwright_python_mcp.backend.tool import Tool, param
+from playwright_python_mcp.backend.tool import param, tab_tool
 
 Number = int | float
 
@@ -99,14 +99,14 @@ async def _handle_mouse_drag_xy(context: Context, params: dict[str, Any], respon
 
 
 mouse_tools = [
-    Tool(
+    tab_tool(
         name="browser_mouse_move_xy",
         capability="vision",
         tool_type="input",
         parameters=(param("x", Number), param("y", Number)),
         handler=_handle_mouse_move_xy,
     ),
-    Tool(
+    tab_tool(
         name="browser_mouse_click_xy",
         capability="vision",
         tool_type="input",
@@ -119,28 +119,28 @@ mouse_tools = [
         ),
         handler=_handle_mouse_click_xy,
     ),
-    Tool(
+    tab_tool(
         name="browser_mouse_down",
         capability="vision",
         tool_type="input",
         parameters=(param("button", Button | None, None),),
         handler=_handle_mouse_down,
     ),
-    Tool(
+    tab_tool(
         name="browser_mouse_up",
         capability="vision",
         tool_type="input",
         parameters=(param("button", Button | None, None),),
         handler=_handle_mouse_up,
     ),
-    Tool(
+    tab_tool(
         name="browser_mouse_wheel",
         capability="vision",
         tool_type="input",
         parameters=(param("deltaX", Number, 0), param("deltaY", Number, 0)),
         handler=_handle_mouse_wheel,
     ),
-    Tool(
+    tab_tool(
         name="browser_mouse_drag_xy",
         capability="vision",
         tool_type="input",

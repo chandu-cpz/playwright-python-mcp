@@ -6,12 +6,18 @@ from playwright_python_mcp.backend.codegen import python_call, python_invocation
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
 from playwright_python_mcp.backend.tab import Button, Modifier
-from playwright_python_mcp.backend.tool import Tool, param
+from playwright_python_mcp.backend.tool import param, tab_tool
 
 
 async def _handle_snapshot(context: Context, params: dict[str, Any], response: Response) -> None:
+    root = None
+    target = params.get("target")
+    if target:
+        tab = await context.ensure_tab()
+        root = (await tab.resolve_target(target=target)).locator
     response.set_include_full_snapshot(
-        target=params.get("target"),
+        target=target,
+        root=root,
         depth=params.get("depth"),
         boxes=params.get("boxes"),
         file_name=params.get("filename"),
@@ -82,7 +88,7 @@ async def _handle_uncheck(context: Context, params: dict[str, Any], response: Re
 
 
 snapshot_tools = [
-    Tool(
+    tab_tool(
         name="browser_snapshot",
         capability="core",
         tool_type="readOnly",
@@ -94,7 +100,7 @@ snapshot_tools = [
         ),
         handler=_handle_snapshot,
     ),
-    Tool(
+    tab_tool(
         name="browser_click",
         capability="core",
         tool_type="input",
@@ -107,7 +113,7 @@ snapshot_tools = [
         ),
         handler=_handle_click,
     ),
-    Tool(
+    tab_tool(
         name="browser_select_option",
         capability="core",
         tool_type="input",
@@ -118,14 +124,14 @@ snapshot_tools = [
         ),
         handler=_handle_select_option,
     ),
-    Tool(
+    tab_tool(
         name="browser_hover",
         capability="core",
         tool_type="input",
         parameters=(param("target", str), param("element", str | None, None)),
         handler=_handle_hover,
     ),
-    Tool(
+    tab_tool(
         name="browser_drag",
         capability="core",
         tool_type="input",
@@ -137,14 +143,14 @@ snapshot_tools = [
         ),
         handler=_handle_drag,
     ),
-    Tool(
+    tab_tool(
         name="browser_generate_locator",
         capability="testing",
         tool_type="readOnly",
         parameters=(param("target", str), param("element", str | None, None)),
         handler=_handle_generate_locator,
     ),
-    Tool(
+    tab_tool(
         name="browser_check",
         capability="core-input",
         tool_type="input",
@@ -152,7 +158,7 @@ snapshot_tools = [
         handler=_handle_check,
         skill_only=True,
     ),
-    Tool(
+    tab_tool(
         name="browser_uncheck",
         capability="core-input",
         tool_type="input",

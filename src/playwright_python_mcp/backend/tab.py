@@ -22,6 +22,7 @@ from playwright.async_api import (
 from .locator_generator import as_python_locator
 from .locator_parser import locator_or_selector_as_selector
 from .log_file import LogFile
+from .utils import sanitize_for_file_path
 
 if TYPE_CHECKING:
     from .context import Context
@@ -111,15 +112,16 @@ class Tab:
         self._main_document_status: DocumentStatus | None = None
         self._navigation_index = 0
         self._console_log = LogFile(context, file_prefix="console", title="Console")
+        self._listeners: list[tuple[Any, str, Any]] = []
         self._initialized = context.track_task(asyncio.create_task(self._initialize()))
-        page.on("console", self._on_console_message)
-        page.on("pageerror", self._on_page_error)
-        page.on("request", self._on_request)
-        page.on("response", self._on_response)
-        page.on("requestfailed", self._on_request_failed)
-        page.on("dialog", self._on_dialog)
-        page.on("filechooser", self._on_file_chooser)
-        page.on("download", self._on_download)
+        self._add_listener(page, "console", self._on_console_message)
+        self._add_listener(page, "pageerror", self._on_page_error)
+        self._add_listener(page, "request", self._on_request)
+        self._add_listener(page, "response", self._on_response)
+        self._add_listener(page, "requestfailed", self._on_request_failed)
+        self._add_listener(page, "dialog", self._on_dialog)
+        self._add_listener(page, "filechooser", self._on_file_chooser)
+        self._add_listener(page, "download", self._on_download)
 
     @property
     def action_timeout(self) -> int | None:
@@ -130,6 +132,10 @@ class Tab:
         return self.context.config.navigation_timeout
 
     async def dispose(self) -> None:
+        for target, event, handler in self._listeners:
+            with suppress(Exception):
+                target.remove_listener(event, handler)
+        self._listeners.clear()
         self._console_log.stop()
 
     async def close(self) -> None:
@@ -370,6 +376,7 @@ class Tab:
         self,
         *,
         target: str | None = None,
+        root: Locator | None = None,
         depth: int | None = None,
         boxes: bool | None = None,
     ) -> str:
@@ -379,6 +386,7 @@ class Tab:
         self,
         *,
         target: str | None = None,
+        root: Locator | None = None,
         depth: int | None = None,
         boxes: bool | None = None,
         relative_to: Path | None = None,
@@ -394,7 +402,7 @@ class Tab:
             )
         aria_snapshot = ""
         if include_aria:
-            aria_snapshot = await self._aria_snapshot_race(target=target, depth=depth, boxes=boxes)
+            aria_snapshot = await self._aria_snapshot_race(target=target, root=root, depth=depth, boxes=boxes)
             if self._modal_states:
                 return TabSnapshot(
                     aria_snapshot="",
@@ -616,7 +624,7 @@ class Tab:
     async def _download_started(self, download: Download) -> None:
         from .context import FilenameTemplate
 
-        suggested_filename = download.suggested_filename
+        suggested_filename = sanitize_for_file_path(download.suggested_filename)
         output_file = await self.context.output_file(
             FilenameTemplate(
                 prefix="download",
@@ -646,6 +654,10 @@ class Tab:
             return
         self.context.track_task(asyncio.create_task(self._console_log.append_line(time.time() * 1000, entry.render())))
 
+    def _add_listener(self, target: Any, event: str, handler: Any) -> None:
+        target.on(event, handler)
+        self._listeners.append((target, event, handler))
+
     async def _initialize(self) -> None:
         messages = await self.page.console_messages(filter="all")
         for message in messages:
@@ -662,6 +674,7 @@ class Tab:
         self,
         *,
         target: str | None,
+        root: Locator | None,
         depth: int | None,
         boxes: bool | None,
     ) -> str:
@@ -669,6 +682,8 @@ class Tab:
             return ""
 
         async def capture() -> str:
+            if root is not None:
+                return await root.aria_snapshot(mode="ai", depth=depth, boxes=boxes)
             if target is None:
                 return await self.page.aria_snapshot(mode="ai", depth=depth, boxes=boxes)
             locator = await self.snapshot_locator(target)

@@ -74,6 +74,8 @@ class Context:
         self._tabs: list[Tab] = []
         self._current_tab: Tab | None = None
         self._routes: list[RouteEntry] = []
+        self._interception_routes: list[tuple[str, Callable[[Any], Any]]] = []
+        self._listeners: list[tuple[Any, str, Callable[..., Any]]] = []
         self.session_log: SessionLog | None = None
         self.trace_legend: TraceLegend | None = None
         self._video_recording: VideoRecording | None = None
@@ -91,6 +93,7 @@ class Context:
             self._on_page_created(page)
 
         self._browser_context.on("page", handle_page)
+        self._listeners.append((self._browser_context, "page", handle_page))
 
     def has_tab(self) -> bool:
         return self._current_tab is not None
@@ -119,12 +122,19 @@ class Context:
         return self._current_tab
 
     async def dispose(self) -> None:
-        with suppress(Exception):
-            await self.stop_video_recording()
         self._restore_exception_handler()
+        for target, event, handler in self._listeners:
+            with suppress(Exception):
+                target.remove_listener(event, handler)
+        self._listeners.clear()
+        for pattern, handler in self._interception_routes:
+            with suppress(Exception):
+                await self._browser_context.unroute(pattern, handler)
+        self._interception_routes.clear()
         for tab in self._tabs:
             await tab.dispose()
-        await self._browser_context.close()
+        with suppress(Exception):
+            await self.stop_video_recording()
         self._tabs.clear()
         self._current_tab = None
 
@@ -194,7 +204,8 @@ class Context:
     async def remove_route(self, pattern: str | None = None) -> int:
         if pattern is None:
             removed = len(self._routes)
-            await self._browser_context.unroute_all()
+            for entry in self._routes:
+                await self._browser_context.unroute(entry.pattern, entry.handler)
             self._routes.clear()
             return removed
         removed_entries = [entry for entry in self._routes if entry.pattern == pattern]
@@ -225,11 +236,15 @@ class Context:
 
     async def _setup_request_interception(self) -> None:
         if self.config.allowed_origins:
-            await self._browser_context.route("**", _abort_route)
+            await self._add_interception_route("**", _abort_route)
             for origin in self.config.allowed_origins:
-                await self._browser_context.route(_origin_or_host_glob(origin), _continue_route)
+                await self._add_interception_route(_origin_or_host_glob(origin), _continue_route)
         for origin in self.config.blocked_origins:
-            await self._browser_context.route(_origin_or_host_glob(origin), _abort_route)
+            await self._add_interception_route(_origin_or_host_glob(origin), _abort_route)
+
+    async def _add_interception_route(self, pattern: str, handler: Callable[[Any], Any]) -> None:
+        await self._browser_context.route(pattern, handler)
+        self._interception_routes.append((pattern, handler))
 
     async def workspace_file(self, file_name: str, per_call_workspace_dir: Path | None = None) -> Path:
         workspace = per_call_workspace_dir or self.cwd
@@ -311,8 +326,16 @@ class Context:
         self._tabs.append(tab)
         if self._current_tab is None:
             self._current_tab = tab
-        page.on("close", lambda _: self._on_page_closed(tab))
-        page.on("crash", lambda _: self._on_page_crashed(tab))
+        def close_listener(_event: Any = None) -> None:
+            self._on_page_closed(tab)
+
+        def crash_listener(_event: Any = None) -> None:
+            self._on_page_crashed(tab)
+
+        page.on("close", close_listener)
+        page.on("crash", crash_listener)
+        self._listeners.append((page, "close", close_listener))
+        self._listeners.append((page, "crash", crash_listener))
         if self._video_recording is not None:
             self.track_task(asyncio.create_task(self._start_page_video(page)))
         return tab

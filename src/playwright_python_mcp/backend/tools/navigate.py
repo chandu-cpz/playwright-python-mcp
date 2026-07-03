@@ -5,7 +5,7 @@ from typing import Any
 from playwright_python_mcp.backend.codegen import python_literal
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
-from playwright_python_mcp.backend.tool import Tool, param
+from playwright_python_mcp.backend.tool import Tool, param, tab_tool
 
 
 async def _handle_navigate(context: Context, params: dict[str, Any], response: Response) -> None:
@@ -42,18 +42,18 @@ navigate_tools = [
         parameters=(param("url", str),),
         handler=_handle_navigate,
     ),
-    Tool(
+    tab_tool(
         name="browser_navigate_back",
         capability="core-navigation",
         handler=_handle_go_back,
     ),
-    Tool(
+    tab_tool(
         name="browser_navigate_forward",
         capability="core-navigation",
         handler=_handle_go_forward,
         skill_only=True,
     ),
-    Tool(
+    tab_tool(
         name="browser_reload",
         capability="core-navigation",
         handler=_handle_reload,

@@ -4,7 +4,7 @@ from typing import Any
 
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
-from playwright_python_mcp.backend.tool import Tool, param
+from playwright_python_mcp.backend.tool import param, tab_tool
 
 
 async def _handle_dialog(context: Context, params: dict[str, Any], _response: Response) -> None:
@@ -21,7 +21,7 @@ async def _handle_dialog(context: Context, params: dict[str, Any], _response: Re
 
 
 dialog_tools = [
-    Tool(
+    tab_tool(
         name="browser_handle_dialog",
         capability="core",
         parameters=(

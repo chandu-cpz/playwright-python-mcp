@@ -6,7 +6,7 @@ from typing import Any, cast
 from playwright_python_mcp.backend.codegen import python_literal
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
-from playwright_python_mcp.backend.tool import Tool, param
+from playwright_python_mcp.backend.tool import param, tab_tool
 
 
 async def _handle_file_upload(context: Context, params: dict[str, Any], response: Response) -> None:
@@ -51,14 +51,14 @@ async def _handle_drop(context: Context, params: dict[str, Any], response: Respo
 
 
 file_tools = [
-    Tool(
+    tab_tool(
         name="browser_file_upload",
         capability="core",
         parameters=(param("paths", list[str] | None, None),),
         handler=_handle_file_upload,
         clears_modal_state="fileChooser",
     ),
-    Tool(
+    tab_tool(
         name="browser_drop",
         capability="core",
         parameters=(

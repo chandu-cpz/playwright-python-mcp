@@ -5,7 +5,7 @@ from typing import Any
 
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
-from playwright_python_mcp.backend.tool import Tool, param
+from playwright_python_mcp.backend.tool import Tool, param, tab_tool
 
 
 async def _handle_resume(context: Context, params: dict[str, Any], _response: Response) -> None:
@@ -92,14 +92,14 @@ devtools_tools = [
         parameters=(param("step", bool | None, None), param("location", str | None, None)),
         handler=_handle_resume,
     ),
-    Tool(
+    tab_tool(
         name="browser_highlight",
         capability="devtools",
         tool_type="readOnly",
         parameters=(param("target", str), param("element", str | None, None), param("style", str | None, None)),
         handler=_handle_highlight,
     ),
-    Tool(
+    tab_tool(
         name="browser_hide_highlight",
         capability="devtools",
         tool_type="readOnly",

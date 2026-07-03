@@ -5,7 +5,7 @@ from typing import Any
 from playwright_python_mcp.backend.codegen import python_call, python_literal
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
-from playwright_python_mcp.backend.tool import Tool, param
+from playwright_python_mcp.backend.tool import param, tab_tool
 
 
 async def _handle_press_key(context: Context, params: dict[str, Any], response: Response) -> None:
@@ -61,14 +61,14 @@ async def _handle_keyup(context: Context, params: dict[str, Any], response: Resp
 
 
 keyboard_tools = [
-    Tool(
+    tab_tool(
         name="browser_press_key",
         capability="core-input",
         tool_type="input",
         parameters=(param("key", str),),
         handler=_handle_press_key,
     ),
-    Tool(
+    tab_tool(
         name="browser_type",
         capability="core-input",
         tool_type="input",
@@ -81,7 +81,7 @@ keyboard_tools = [
         ),
         handler=_handle_type,
     ),
-    Tool(
+    tab_tool(
         name="browser_press_sequentially",
         capability="core-input",
         tool_type="input",
@@ -89,7 +89,7 @@ keyboard_tools = [
         handler=_handle_press_sequentially,
         skill_only=True,
     ),
-    Tool(
+    tab_tool(
         name="browser_keydown",
         capability="core-input",
         tool_type="input",
@@ -97,7 +97,7 @@ keyboard_tools = [
         handler=_handle_keydown,
         skill_only=True,
     ),
-    Tool(
+    tab_tool(
         name="browser_keyup",
         capability="core-input",
         tool_type="input",

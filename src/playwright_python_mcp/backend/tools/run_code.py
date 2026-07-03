@@ -9,7 +9,7 @@ from typing import Any
 
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
-from playwright_python_mcp.backend.tool import Tool, param
+from playwright_python_mcp.backend.tool import param, tab_tool
 
 
 async def _handle_run_code_unsafe(context: Context, params: dict[str, Any], response: Response) -> None:
@@ -99,7 +99,7 @@ _SAFE_BUILTINS: dict[str, Callable[..., Any] | type[BaseException] | type[object
 
 
 run_code_tools = [
-    Tool(
+    tab_tool(
         name="browser_run_code_unsafe",
         capability="core",
         description=(

@@ -6,7 +6,7 @@ from playwright_python_mcp.backend.codegen import python_literal
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.locator_generator import as_python_locator
 from playwright_python_mcp.backend.response import Response
-from playwright_python_mcp.backend.tool import Tool, param
+from playwright_python_mcp.backend.tool import param, tab_tool
 
 
 VerifyValueType = Literal["textbox", "checkbox", "radio", "combobox", "slider"]
@@ -81,28 +81,28 @@ async def _handle_verify_value(context: Context, params: dict[str, Any], respons
 
 
 verify_tools = [
-    Tool(
+    tab_tool(
         name="browser_verify_element_visible",
         capability="testing",
         tool_type="assertion",
         parameters=(param("role", str), param("accessibleName", str)),
         handler=_handle_verify_element_visible,
     ),
-    Tool(
+    tab_tool(
         name="browser_verify_text_visible",
         capability="testing",
         tool_type="assertion",
         parameters=(param("text", str),),
         handler=_handle_verify_text_visible,
     ),
-    Tool(
+    tab_tool(
         name="browser_verify_list_visible",
         capability="testing",
         tool_type="assertion",
         parameters=(param("element", str), param("target", str), param("items", list[str])),
         handler=_handle_verify_list_visible,
     ),
-    Tool(
+    tab_tool(
         name="browser_verify_value",
         capability="testing",
         tool_type="assertion",

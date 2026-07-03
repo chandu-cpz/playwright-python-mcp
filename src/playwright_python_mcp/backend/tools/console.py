@@ -4,7 +4,7 @@ from typing import Any
 
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
-from playwright_python_mcp.backend.tool import Tool, param
+from playwright_python_mcp.backend.tool import tab_tool, param
 
 
 async def _handle_console_messages(context: Context, params: dict[str, Any], response: Response) -> None:
@@ -31,7 +31,7 @@ async def _handle_console_clear(context: Context, _params: dict[str, Any], _resp
 
 
 console_tools = [
-    Tool(
+    tab_tool(
         name="browser_console_messages",
         capability="core",
         tool_type="readOnly",
@@ -42,7 +42,7 @@ console_tools = [
         ),
         handler=_handle_console_messages,
     ),
-    Tool(
+    tab_tool(
         name="browser_console_clear",
         capability="core",
         tool_type="readOnly",

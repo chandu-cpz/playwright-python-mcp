@@ -5,7 +5,7 @@ from typing import Any, Literal, TypedDict
 from playwright_python_mcp.backend.codegen import python_call, python_literal
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
-from playwright_python_mcp.backend.tool import Tool, param
+from playwright_python_mcp.backend.tool import param, tab_tool
 
 
 class FormField(TypedDict):
@@ -34,7 +34,7 @@ async def _handle_fill_form(context: Context, params: dict[str, Any], response: 
 
 
 form_tools = [
-    Tool(
+    tab_tool(
         name="browser_fill_form",
         capability="core",
         tool_type="input",

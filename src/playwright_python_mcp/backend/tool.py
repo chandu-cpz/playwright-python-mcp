@@ -50,3 +50,8 @@ class Tool:
 
 def param(name: str, annotation: object, default: object = Parameter.empty) -> ToolParameter:
     return ToolParameter(name=name, annotation=annotation, default=default)
+
+
+def tab_tool(*args: Any, **kwargs: Any) -> Tool:
+    kwargs["blocks_on_modal_state"] = True
+    return Tool(*args, **kwargs)

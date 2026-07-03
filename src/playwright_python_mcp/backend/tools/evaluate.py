@@ -6,7 +6,7 @@ from typing import Any
 from playwright_python_mcp.backend.codegen import python_literal
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
-from playwright_python_mcp.backend.tool import Tool, param
+from playwright_python_mcp.backend.tool import param, tab_tool
 
 
 async def _handle_evaluate(context: Context, params: dict[str, Any], response: Response) -> None:
@@ -39,7 +39,7 @@ async def _handle_evaluate(context: Context, params: dict[str, Any], response: R
 
 
 evaluate_tools = [
-    Tool(
+    tab_tool(
         name="browser_evaluate",
         capability="core",
         parameters=(
