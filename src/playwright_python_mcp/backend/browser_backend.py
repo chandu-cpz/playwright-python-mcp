@@ -42,6 +42,7 @@ class BrowserBackend:
         shared_browser_owner: BrowserBackend | None = None,
         close_shared_browser: bool = True,
         close_browser_context: bool = True,
+        browser_context: PlaywrightBrowserContext | None = None,
     ) -> None:
         self._config = config
         self._tools = {tool.name: tool for tool in tools}
@@ -50,7 +51,8 @@ class BrowserBackend:
         self._close_browser_context = close_browser_context
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
-        self._playwright_context: PlaywrightBrowserContext | None = None
+        self._playwright_context: PlaywrightBrowserContext | None = browser_context
+        self._supplied_browser_context = browser_context is not None
         self._extension_relay: CDPRelayServer | None = None
         self._context: Context | None = None
         self._session_log: SessionLog | None = None
@@ -72,12 +74,13 @@ class BrowserBackend:
         *,
         roots: list[str] | None = None,
         meta: dict[str, Any] | None = None,
-    ) -> str | ToolResult | CallToolResult:
+    ) -> Any:
         tool = self._tools.get(name)
         if tool is None:
             return _format_error(f'Tool "{name}" not found', json_mode=bool(meta and meta.get("json")))
 
         client_cwd = _client_cwd(meta=meta, roots=roots)
+        result: str | ToolResult | CallToolResult
 
         try:
             context = await self._ensure_context(cwd=client_cwd, roots=roots)
@@ -215,6 +218,8 @@ class BrowserBackend:
         if self._browser is None and self._playwright_context is None:
             self._browser = await self._launch_browser(cwd)
         if self._playwright_context is not None:
+            if self._supplied_browser_context and self._config.browser_isolated:
+                raise ValueError("Creating a new context is not supported for supplied browser contexts.")
             browser_context = self._playwright_context
         else:
             assert self._browser is not None
@@ -470,19 +475,23 @@ def _format_error(message: str, *, json_mode: bool) -> ToolResult:
 def _attach_close_marker(result: str | ToolResult | CallToolResult) -> CallToolResult:
     if isinstance(result, CallToolResult):
         data = result.model_dump(by_alias=True)
-        data["isClose"] = True
+        data["_meta"] = {**(data.get("_meta") or {}), "isClose": True}
         return CallToolResult(**data)
     if isinstance(result, ToolResult):
         converted = result.to_mcp_result()
         if isinstance(converted, CallToolResult):
             data = converted.model_dump(by_alias=True)
-            data["isClose"] = True
+            data["_meta"] = {**(data.get("_meta") or {}), "isClose": True}
             return CallToolResult(**data)
         if isinstance(converted, tuple):
             content, structured_content = converted
-            return CallToolResult(content=content, structuredContent=structured_content, isClose=True)
-        return CallToolResult(content=converted, isClose=True)
-    return CallToolResult(content=[TextContent(type="text", text=result)], isClose=True)
+            return CallToolResult(
+                content=content,
+                structuredContent=structured_content,
+                _meta={"isClose": True},
+            )
+        return CallToolResult(content=converted, _meta={"isClose": True})
+    return CallToolResult(content=[TextContent(type="text", text=result)], _meta={"isClose": True})
 
 
 async def _server_registry_find(name: str) -> dict[str, Any] | None:

@@ -111,6 +111,14 @@ def load_config(
     return _server_config_from_merged(merged)
 
 
+def resolve_config(user_config: dict[str, Any] | ServerConfig | None = None) -> ServerConfig:
+    if isinstance(user_config, ServerConfig):
+        return user_config
+    merged = _merge_config(DEFAULT_CONFIG, user_config or {})
+    _validate_and_complete(merged)
+    return _server_config_from_merged(merged)
+
+
 def _config_from_cli(
     *,
     browser: str | None,
@@ -233,6 +241,7 @@ def _config_from_env(env: os._Environ[str]) -> dict[str, Any]:
         isolated=_env_bool(env, "PLAYWRIGHT_MCP_ISOLATED"),
         image_responses=_env_string(env, "PLAYWRIGHT_MCP_IMAGE_RESPONSES"),
         sandbox=_env_bool(env, "PLAYWRIGHT_MCP_SANDBOX"),
+        shared_browser_context=_env_bool(env, "PLAYWRIGHT_MCP_SHARED_BROWSER_CONTEXT"),
         output_max_size=_env_int(env, "PLAYWRIGHT_MCP_OUTPUT_MAX_SIZE"),
         output_mode=_env_string(env, "PLAYWRIGHT_MCP_OUTPUT_MODE"),
         port=_env_int(env, "PLAYWRIGHT_MCP_PORT"),

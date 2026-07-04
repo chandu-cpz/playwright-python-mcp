@@ -4,7 +4,6 @@ import asyncio
 import inspect
 import json
 import textwrap
-from collections.abc import Callable
 from typing import Any
 
 from playwright_python_mcp.backend.context import Context
@@ -34,7 +33,6 @@ async def _handle_run_code_unsafe(context: Context, params: dict[str, Any], resp
 async def _execute_python_code(code: str, page: Any) -> Any:
     end = asyncio.get_running_loop().create_future()
     namespace: dict[str, Any] = {
-        "__builtins__": _SAFE_BUILTINS,
         "page": page,
         "__end__": end,
     }
@@ -77,36 +75,32 @@ async def _execute_in_namespace(code: str, page: Any, namespace: dict[str, Any])
     exec(function_source, namespace, namespace)  # noqa: S102 - this tool is explicitly unsafe.
     return await namespace["__mcp_run"](page)
 
-
-_SAFE_BUILTINS: dict[str, Callable[..., Any] | type[BaseException] | type[object]] = {
-    "Exception": Exception,
-    "RuntimeError": RuntimeError,
-    "ValueError": ValueError,
-    "TypeError": TypeError,
-    "AssertionError": AssertionError,
-    "str": str,
-    "repr": repr,
-    "len": len,
-    "dict": dict,
-    "list": list,
-    "tuple": tuple,
-    "set": set,
-    "bool": bool,
-    "int": int,
-    "float": float,
-    "print": print,
-}
-
-
 run_code_tools = [
     tab_tool(
         name="browser_run_code_unsafe",
         capability="core",
+        title="Run Playwright code (unsafe)",
         description=(
-            "Run Python Playwright code against the current page. "
-            "This is an intentional Python-native divergence from upstream JavaScript snippet execution."
+            "Run a Python Playwright code snippet. Unsafe: executes arbitrary Python in the Playwright server "
+            "process with normal builtins/imports and is RCE-equivalent."
         ),
-        parameters=(param("code", str | None, None), param("filename", str | None, None)),
+        parameters=(
+            param(
+                "code",
+                str | None,
+                None,
+                description=(
+                    "Python Playwright code to execute. It may define an async function or provide statements "
+                    "that run with page in scope."
+                ),
+            ),
+            param(
+                "filename",
+                str | None,
+                None,
+                description="Load code from the specified file. If both code and filename are provided, code will be ignored.",
+            ),
+        ),
         handler=_handle_run_code_unsafe,
     )
 ]

@@ -4,7 +4,9 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from inspect import Parameter, Signature
 from types import UnionType
-from typing import TYPE_CHECKING, Any, Literal, Union, get_args, get_origin, get_type_hints, is_typeddict
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, cast, get_args, get_origin, get_type_hints, is_typeddict
+
+from pydantic import Field
 
 if TYPE_CHECKING:
     from .context import Context
@@ -21,6 +23,16 @@ class ToolParameter:
     name: str
     annotation: object
     default: object = Parameter.empty
+    description: str | None = None
+    hidden: bool = False
+
+    def signature_annotation(self) -> object:
+        if self.description is None:
+            return self.annotation
+        return cast(
+            object,
+            Annotated[self.annotation, Field(description=self.description)],  # type: ignore[valid-type]  # ty: ignore[invalid-type-form]
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,9 +55,10 @@ class Tool:
                     parameter.name,
                     Parameter.KEYWORD_ONLY,
                     default=parameter.default,
-                    annotation=parameter.annotation,
+                    annotation=parameter.signature_annotation(),
                 )
                 for parameter in self.parameters
+                if not parameter.hidden
             ]
         )
 
@@ -71,8 +84,21 @@ class Tool:
         return parsed
 
 
-def param(name: str, annotation: object, default: object = Parameter.empty) -> ToolParameter:
-    return ToolParameter(name=name, annotation=annotation, default=default)
+def param(
+    name: str,
+    annotation: object,
+    default: object = Parameter.empty,
+    *,
+    description: str | None = None,
+    hidden: bool = False,
+) -> ToolParameter:
+    return ToolParameter(
+        name=name,
+        annotation=annotation,
+        default=default,
+        description=description,
+        hidden=hidden,
+    )
 
 
 def tab_tool(*args: Any, **kwargs: Any) -> Tool:

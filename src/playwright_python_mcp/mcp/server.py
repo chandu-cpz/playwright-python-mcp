@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import os
 import signal
 from dataclasses import dataclass, field
 from functools import wraps
 from importlib.metadata import PackageNotFoundError, version
-from inspect import Parameter, Signature
-from typing import Any, Literal
+from inspect import Parameter, Signature, isawaitable
+from typing import Any, Awaitable, Callable, Literal, cast
 from urllib.parse import unquote, urlparse
 
 import anyio
@@ -13,13 +14,14 @@ from fastmcp import FastMCP
 from fastmcp.server.context import Context as FastMCPContext
 from fastmcp.server.middleware import CallNext, Middleware as FastMCPMiddleware, MiddlewareContext
 from mcp.types import ToolAnnotations
+from playwright.async_api import BrowserContext as PlaywrightBrowserContext
 from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
 from playwright_python_mcp.backend import BrowserBackend
 from playwright_python_mcp.backend.tools import filtered_tools
-from playwright_python_mcp.mcp.config import ServerConfig
+from playwright_python_mcp.mcp.config import ServerConfig, resolve_config
 
 
 @dataclass(slots=True)
@@ -78,13 +80,32 @@ class PlaywrightMCPServer:
 def create_server(config: ServerConfig) -> PlaywrightMCPServer:
     tools = filtered_tools(config)
     backend_pool = BackendPool(config, tools)
+    return _create_server(config, backend_pool)
+
+
+async def create_connection(
+    user_config: dict[str, Any] | ServerConfig | None = None,
+    context_getter: Callable[[], Awaitable[PlaywrightBrowserContext] | PlaywrightBrowserContext] | None = None,
+) -> PlaywrightMCPServer:
+    config = resolve_config(user_config)
+    tools = filtered_tools(config)
+    backend_pool = BackendPool(config, tools, context_getter=context_getter)
+    return _create_server(config, backend_pool)
+
+
+def _create_server(config: ServerConfig, backend_pool: BackendPool) -> PlaywrightMCPServer:
+    tools = backend_pool.tools
     app = FastMCP(name="Playwright", version=_package_version())
+    heartbeat_timeout = _ping_timeout_ms()
+    if heartbeat_timeout > 0:
+        app.add_middleware(HeartbeatMiddleware(backend_pool, timeout_ms=heartbeat_timeout))
     app.add_middleware(BackendSessionCleanupMiddleware(backend_pool))
 
     for tool in tools:
         read_only = tool.tool_type in {"readOnly", "assertion"}
         handler = _make_fastmcp_handler(backend_pool, tool.name)
         signature = tool.signature()
+        handler_annotations = {name: parameter.annotation for name, parameter in signature.parameters.items()}
         handler.__signature__ = Signature(
             parameters=[
                 *signature.parameters.values(),
@@ -92,7 +113,7 @@ def create_server(config: ServerConfig) -> PlaywrightMCPServer:
                 Parameter("ctx", Parameter.KEYWORD_ONLY, annotation=FastMCPContext),
             ]
         )
-        handler.__annotations__ = {parameter.name: parameter.annotation for parameter in tool.parameters}
+        handler.__annotations__ = handler_annotations
         handler.__annotations__["_meta"] = dict[str, Any] | None
         handler.__annotations__["ctx"] = FastMCPContext
         handler.__annotations__["return"] = Any
@@ -144,13 +165,24 @@ def _http_middleware(config: ServerConfig) -> list[Middleware]:
 
 
 class BackendPool:
-    def __init__(self, config: ServerConfig, tools: list[Any]) -> None:
+    def __init__(
+        self,
+        config: ServerConfig,
+        tools: list[Any],
+        *,
+        context_getter: Callable[[], Awaitable[PlaywrightBrowserContext] | PlaywrightBrowserContext] | None = None,
+    ) -> None:
         self._config = config
         self._tools = tools
+        self._context_getter = context_getter
         self._backends: dict[str, BrowserBackend] = {}
         self._default_key = "__default__"
         self._shared_browser_owner: BrowserBackend | None = None
         self._client_count = 0
+
+    @property
+    def tools(self) -> list[Any]:
+        return self._tools
 
     def default_backend(self) -> BrowserBackend:
         backend = self._backends.get(self._default_key)
@@ -163,12 +195,20 @@ class BackendPool:
         key = key or self._default_key
         backend = self._backends.get(key)
         if backend is None:
+            supplied_context = await self._supplied_context()
             backend = BrowserBackend(
                 self._config,
                 self._tools,
-                shared_browser_owner=self._shared_owner() if self._uses_shared_browser_owner() else None,
+                shared_browser_owner=(
+                    None
+                    if supplied_context is not None
+                    else self._shared_owner()
+                    if self._uses_shared_browser_owner()
+                    else None
+                ),
                 close_shared_browser=False,
-                close_browser_context=not self._config.shared_browser_context,
+                close_browser_context=not self._config.shared_browser_context and supplied_context is None,
+                browser_context=supplied_context,
             )
             self._backends[key] = backend
             self._client_count += 1
@@ -201,6 +241,64 @@ class BackendPool:
         if self._shared_browser_owner is None:
             self._shared_browser_owner = BrowserBackend(self._config, self._tools)
         return self._shared_browser_owner
+
+    async def _supplied_context(self) -> PlaywrightBrowserContext | None:
+        if self._context_getter is None:
+            return None
+        context = self._context_getter()
+        if isawaitable(context):
+            return cast(PlaywrightBrowserContext, await context)
+        return cast(PlaywrightBrowserContext, context)
+
+
+class HeartbeatMiddleware(FastMCPMiddleware):
+    def __init__(self, backend_pool: BackendPool, *, timeout_ms: int, interval_ms: int = 3000) -> None:
+        self._backend_pool = backend_pool
+        self._timeout_ms = timeout_ms
+        self._interval_ms = interval_ms
+        self._active_sessions: set[int] = set()
+        self._lock = anyio.Lock()
+
+    async def on_message(self, context: MiddlewareContext[Any], call_next: CallNext[Any, Any]) -> Any:
+        fastmcp_context = context.fastmcp_context
+        if fastmcp_context is None or fastmcp_context.request_context is None:
+            return await call_next(context)
+
+        session = fastmcp_context.session
+        session_identity = id(session)
+        session_id = _session_id(fastmcp_context)
+        async with self._lock:
+            if session_identity not in self._active_sessions:
+                task_group = getattr(session, "_subscription_task_group", None)
+                if task_group is not None:
+                    self._active_sessions.add(session_identity)
+                    task_group.start_soon(self._heartbeat_loop, session, session_identity, session_id)
+
+        return await call_next(context)
+
+    async def _heartbeat_loop(self, session: Any, session_identity: int, session_id: str | None) -> None:
+        try:
+            while True:
+                await anyio.sleep(self._interval_ms / 1000)
+                with anyio.move_on_after(self._timeout_ms / 1000) as scope:
+                    await session.send_ping()
+                if scope.cancel_called:
+                    await self._close_dead_session(session, session_id)
+                    return
+        except anyio.ClosedResourceError:
+            return
+        except Exception:
+            await self._close_dead_session(session, session_id)
+        finally:
+            self._active_sessions.discard(session_identity)
+
+    async def _close_dead_session(self, session: Any, session_id: str | None) -> None:
+        with anyio.CancelScope(shield=True):
+            await self._backend_pool.close(session_id)
+        task_group = getattr(session, "_subscription_task_group", None)
+        cancel_scope = getattr(task_group, "cancel_scope", None)
+        if cancel_scope is not None:
+            cancel_scope.cancel()
 
 
 class BackendSessionCleanupMiddleware(FastMCPMiddleware):
@@ -261,6 +359,16 @@ def _package_version() -> str:
         return version("playwright-python-mcp")
     except PackageNotFoundError:
         return "0.0.0"
+
+
+def _ping_timeout_ms() -> int:
+    value = os.environ.get("PLAYWRIGHT_MCP_PING_TIMEOUT_MS")
+    if value is None:
+        return 5000
+    try:
+        return int(value)
+    except ValueError:
+        return 5000
 
 
 async def _tool_handler(**_kwargs: Any):

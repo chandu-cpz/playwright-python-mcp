@@ -144,14 +144,16 @@ class Context:
     async def ensure_tab(self) -> Tab:
         crashed = self._current_tab is not None and self._current_tab.crashed
         if crashed:
+            crashed_tab = self._current_tab
+            assert crashed_tab is not None
             with suppress(Exception):
-                await self._current_tab.page.close()
+                await crashed_tab.page.close()
             self._current_tab = None
         if self._current_tab is None:
             await self.new_tab()
+        assert self._current_tab is not None
         if crashed:
             self._current_tab.log_error_message("Page crashed and was reset to about:blank.")
-        assert self._current_tab is not None
         return self._current_tab
 
     async def new_tab(self) -> Tab:

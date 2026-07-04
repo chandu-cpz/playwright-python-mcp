@@ -388,10 +388,17 @@ def render_tabs_markdown(tabs: list[TabHeader]) -> list[str]:
 def render_modal_states(modal_states: list[dict[str, object]]) -> list[str]:
     if not modal_states:
         return ["- There is no modal state present"]
-    return [
-        f"- [{state.get('description', 'Modal state')}]: can be handled by {state.get('cleared_by', 'the matching tool')}"
-        for state in modal_states
-    ]
+    lines: list[str] = []
+    for state in modal_states:
+        cleared_by = state.get("clearedBy")
+        if isinstance(cleared_by, dict):
+            tool = cleared_by.get("tool", "the matching tool")
+            skill = cleared_by.get("skill")
+            handler = f"{tool} ({skill})" if skill else str(tool)
+        else:
+            handler = str(cleared_by or "the matching tool")
+        lines.append(f"- [{state.get('description', 'Modal state')}]: can be handled by {handler}")
+    return lines
 
 
 def scale_image_to_fit_message(data: bytes, image_type: str) -> bytes:

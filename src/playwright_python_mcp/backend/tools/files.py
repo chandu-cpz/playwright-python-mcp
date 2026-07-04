@@ -23,7 +23,7 @@ async def _handle_file_upload(context: Context, params: dict[str, Any], response
     response.set_include_snapshot()
     response.add_code(f"await file_chooser.set_files({python_literal(paths)})")
     tab.clear_modal_state(modal_state)
-    file_chooser = modal_state["file_chooser"]
+    file_chooser = modal_state["fileChooser"]
     if paths is not None:
         await tab.wait_for_completion(lambda: file_chooser.set_files(file_names or []))
 

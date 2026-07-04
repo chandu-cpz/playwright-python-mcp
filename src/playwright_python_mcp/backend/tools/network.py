@@ -9,6 +9,7 @@ from playwright.async_api import Request, Response as PlaywrightResponse
 from playwright_python_mcp.backend.codegen import python_literal
 from playwright_python_mcp.backend.context import Context, FilenameTemplate
 from playwright_python_mcp.backend.response import Response
+from playwright_python_mcp.backend.tab import RequestEntry
 from playwright_python_mcp.backend.tool import Tool, param, tab_tool
 
 RequestPart = Literal["request-headers", "request-body", "response-headers", "response-body"]
@@ -17,16 +18,16 @@ NetworkState = Literal["online", "offline"]
 
 async def _handle_network_requests(context: Context, params: dict[str, Any], response: Response) -> None:
     tab = await context.ensure_tab()
-    all_requests = tab.requests()
+    all_requests = tab.request_entries()
     filter_pattern = _compile_filter(params.get("filter"))
     lines: list[str] = []
     hidden_static_count = 0
 
     for index, request in enumerate(all_requests, start=1):
-        if not params.get("static", False) and not _is_fetch(request) and _is_successful_response(request):
+        if not params.get("static", False) and not _is_fetch(request.request) and _is_successful_response(request):
             hidden_static_count += 1
             continue
-        if filter_pattern and filter_pattern.search(request.url) is None:
+        if filter_pattern and filter_pattern.search(request.request.url) is None:
             continue
         lines.append(f"{index}. {_render_request_line(request)}")
 
@@ -48,7 +49,7 @@ async def _handle_network_requests(context: Context, params: dict[str, Any], res
 
 async def _handle_network_request(context: Context, params: dict[str, Any], response: Response) -> None:
     tab = await context.ensure_tab()
-    all_requests = tab.requests()
+    all_requests = tab.request_entries()
     index = params["index"]
     if index < 1 or index > len(all_requests):
         response.add_error(f"Request #{index} not found. Use browser_network_requests to see available indexes.")
@@ -82,19 +83,60 @@ async def _handle_network_state_set(context: Context, params: dict[str, Any], re
     response.add_code(f"await page.context.set_offline({python_literal(offline)})")
 
 
-def _compile_filter(value: str | None) -> re.Pattern[str] | None:
-    if not value:
-        return None
+def compile_upstream_regex(source: str) -> re.Pattern[str]:
+    pattern = source
+    flags = 0
+    if source.startswith("/"):
+        end = _regex_literal_end(source)
+        flag_text = source[end + 1 :] if end is not None else ""
+        if end is not None and (not flag_text or flag_text.isalpha()):
+            pattern = source[1:end]
+            for flag in flag_text:
+                if flag == "i":
+                    flags |= re.IGNORECASE
+                elif flag == "m":
+                    flags |= re.MULTILINE
+                elif flag == "s":
+                    flags |= re.DOTALL
+                else:
+                    raise ValueError(f"Unsupported regular expression flag: {flag}")
     try:
-        return re.compile(value)
+        return re.compile(pattern, flags)
     except re.error as exc:
         raise ValueError("Invalid regular expression") from exc
 
 
-def _is_successful_response(request: Request) -> bool:
-    if request.failure:
+def _compile_filter(value: str | None) -> re.Pattern[str] | None:
+    if not value:
+        return None
+    return compile_upstream_regex(value)
+
+
+def _regex_literal_end(source: str) -> int | None:
+    escaped = False
+    in_class = False
+    for index, char in enumerate(source[1:], start=1):
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == "[":
+            in_class = True
+            continue
+        if char == "]":
+            in_class = False
+            continue
+        if char == "/" and not in_class:
+            return index
+    return None
+
+
+def _is_successful_response(entry: RequestEntry) -> bool:
+    if entry.failure:
         return False
-    http_response = request.existing_response
+    http_response = entry.response
     return http_response is not None and http_response.status < 400
 
 
@@ -102,23 +144,25 @@ def _is_fetch(request: Request) -> bool:
     return request.resource_type in {"fetch", "xhr"}
 
 
-def _render_request_line(request: Request) -> str:
-    response = request.existing_response
+def _render_request_line(entry: RequestEntry) -> str:
+    request = entry.request
+    response = entry.response
     line = f"[{request.method.upper()}] {_truncate_data_url(request.url)}"
     if response is not None:
         line += f" => [{response.status}] {response.status_text}"
-    elif request.failure:
-        line += f" => [FAILED] {request.failure or 'Unknown error'}"
+    elif entry.failure:
+        line += f" => [FAILED] {entry.failure or 'Unknown error'}"
     return line
 
 
-def _render_request_details(index: int, request: Request) -> str:
-    http_response = request.existing_response
+def _render_request_details(index: int, entry: RequestEntry) -> str:
+    request = entry.request
+    http_response = entry.response
     lines: list[str] = [f"#{index} [{request.method.upper()}] {_truncate_data_url(request.url)}", "", "  General"]
     if http_response is not None:
         lines.append(f"    status:    [{http_response.status}] {http_response.status_text}")
-    elif request.failure:
-        lines.append(f"    status:    [FAILED] {request.failure or 'Unknown error'}")
+    elif entry.failure:
+        lines.append(f"    status:    [FAILED] {entry.failure or 'Unknown error'}")
     duration = _compute_duration_ms(request)
     if duration is not None:
         lines.append(f"    duration:  {duration}ms")
@@ -143,11 +187,12 @@ def _render_request_details(index: int, request: Request) -> str:
 
 
 async def _render_request_part(
-    request: Request,
+    entry: RequestEntry,
     part: RequestPart,
     response: Response,
     suggested_filename: str | None,
 ) -> None:
+    request = entry.request
     if part == "request-headers":
         await response.add_result(
             "Request headers",
@@ -168,7 +213,7 @@ async def _render_request_part(
             )
         return
 
-    http_response = request.existing_response
+    http_response = entry.response
     if http_response is None:
         return
     if part == "response-headers":
@@ -277,10 +322,33 @@ network_tools = [
         name="browser_network_requests",
         capability="core",
         tool_type="readOnly",
+        title="List network requests",
+        description=(
+            "Returns a numbered list of network requests since loading the page. Use browser_network_request "
+            "with the number to get full details."
+        ),
         parameters=(
-            param("static", bool, False),
-            param("filter", str | None, None),
-            param("filename", str | None, None),
+            param(
+                "static",
+                bool,
+                False,
+                description=(
+                    "Whether to include successful static resources like images, fonts, scripts, etc. "
+                    "Defaults to false."
+                ),
+            ),
+            param(
+                "filter",
+                str | None,
+                None,
+                description='Only return requests whose URL matches this regexp (e.g. "/api/.*user").',
+            ),
+            param(
+                "filename",
+                str | None,
+                None,
+                description="Filename to save the network requests to. If not provided, requests are returned as text.",
+            ),
         ),
         handler=_handle_network_requests,
     ),
@@ -288,10 +356,20 @@ network_tools = [
         name="browser_network_request",
         capability="core",
         tool_type="readOnly",
+        title="Show network request details",
+        description=(
+            "Returns full details (headers and body) of a single network request, or a single part if `part` "
+            "is set. Use the number from browser_network_requests."
+        ),
         parameters=(
-            param("index", int),
-            param("part", RequestPart | None, None),
-            param("filename", str | None, None),
+            param("index", int, description="1-based index of the request, as printed by browser_network_requests."),
+            param("part", RequestPart | None, None, description="Return only this part of the request. Omit to return full details."),
+            param(
+                "filename",
+                str | None,
+                None,
+                description="Filename to save the result to. If not provided, output is returned as text.",
+            ),
         ),
         handler=_handle_network_request,
     ),
@@ -299,6 +377,8 @@ network_tools = [
         name="browser_network_clear",
         capability="core",
         tool_type="readOnly",
+        title="Clear network requests",
+        description="Clear all network requests",
         handler=_handle_network_clear,
         skill_only=True,
     ),

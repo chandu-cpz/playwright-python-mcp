@@ -60,6 +60,8 @@ class ConsoleEntry:
 @dataclass(slots=True)
 class RequestEntry:
     request: Request
+    response: PlaywrightResponse | None = None
+    failure: str | None = None
 
 
 @dataclass(slots=True)
@@ -426,8 +428,8 @@ class Tab:
             return TabSnapshot(
                 aria_snapshot="",
                 modal_states=list(self._modal_states),
-                events=self._recent_event_entries,
-                console_link=await self._console_log.take(relative_to=relative_to),
+                events=[],
+                console_link=None,
             )
         aria_snapshot = ""
         if include_aria:
@@ -437,7 +439,7 @@ class Tab:
                     aria_snapshot="",
                     modal_states=list(self._modal_states),
                     events=[],
-                    console_link=await self._console_log.take(relative_to=relative_to),
+                    console_link=None,
                 )
         snapshot = TabSnapshot(
             aria_snapshot=aria_snapshot,
@@ -529,6 +531,9 @@ class Tab:
     def requests(self) -> list[Request]:
         return [entry.request for entry in self._requests]
 
+    def request_entries(self) -> list[RequestEntry]:
+        return list(self._requests)
+
     def modal_states(self) -> list[dict[str, Any]]:
         return self._modal_states
 
@@ -549,7 +554,7 @@ class Tab:
         self._console_log = LogFile(self.context, file_prefix="console", title="Console")
 
     async def _console_entries(self, *, all_messages: bool) -> list[ConsoleEntry]:
-        filter_value = "all" if all_messages else "since-navigation"
+        filter_value: Literal["all", "since-navigation"] = "all" if all_messages else "since-navigation"
         try:
             messages = await self.page.console_messages(filter=filter_value)
             errors = await self.page.page_errors(filter=filter_value)
@@ -610,6 +615,7 @@ class Tab:
 
     def _on_response(self, response: PlaywrightResponse) -> None:
         request = response.request
+        self._request_entry(request).response = response
         if _is_main_frame_navigation(self.page, request) and not _is_redirect(response):
             self._main_document_status = DocumentStatus(
                 status=response.status,
@@ -618,7 +624,16 @@ class Tab:
         self._add_log_entry({"type": "request", "request": request})
 
     def _on_request_failed(self, request: Request) -> None:
+        self._request_entry(request).failure = request.failure or "Unknown error"
         self._add_log_entry({"type": "request", "request": request})
+
+    def _request_entry(self, request: Request) -> RequestEntry:
+        for entry in reversed(self._requests):
+            if entry.request is request:
+                return entry
+        entry = RequestEntry(request=request)
+        self._requests.append(entry)
+        return entry
 
     def _on_dialog(self, dialog: Dialog) -> None:
         self._modal_states.append(
@@ -626,7 +641,7 @@ class Tab:
                 "type": "dialog",
                 "description": f'"{dialog.type}" dialog with message "{dialog.message}"',
                 "dialog": dialog,
-                "cleared_by": "browser_handle_dialog",
+                "clearedBy": {"tool": "browser_handle_dialog", "skill": "dialog-accept or dialog-dismiss"},
             }
         )
         self._modal_event.set()
@@ -636,8 +651,8 @@ class Tab:
             {
                 "type": "fileChooser",
                 "description": "File chooser",
-                "file_chooser": file_chooser,
-                "cleared_by": "browser_file_upload",
+                "fileChooser": file_chooser,
+                "clearedBy": {"tool": "browser_file_upload", "skill": "upload"},
             }
         )
         self._modal_event.set()
@@ -709,7 +724,13 @@ class Tab:
         requests = await self.page.requests()
         for request in requests:
             if request.existing_response is not None or request.failure is not None:
-                self._requests.append(RequestEntry(request=request))
+                self._requests.append(
+                    RequestEntry(
+                        request=request,
+                        response=request.existing_response,
+                        failure=request.failure,
+                    )
+                )
         await self.context.run_init_pages(self.page)
 
     async def _aria_snapshot_race(
