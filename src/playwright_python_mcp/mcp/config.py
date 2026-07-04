@@ -312,11 +312,6 @@ def _validate_and_complete(config: dict[str, Any]) -> None:
         launch_options["args"] = args
     if context_options.get("viewport") is None:
         context_options["viewport"] = {"width": 1280, "height": 720} if launch_options.get("headless") else None
-    if browser.get("initPage"):
-        raise ValueError(
-            "browser.initPage / --init-page is not supported by the Python port yet; "
-            "remove it or port the init-page module to Python-native initialization."
-        )
     console = config.setdefault("console", {})
     if console.get("level") not in {None, "error", "warning", "info", "debug"}:
         raise ValueError('console.level must be one of "error", "warning", "info", "debug"')

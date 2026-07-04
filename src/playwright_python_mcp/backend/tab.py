@@ -456,7 +456,7 @@ class Tab:
             url=self.page.url,
             current=self.context.current_tab() is self,
             crashed=self.crashed,
-            console=self.console_message_count(),
+            console=await self.console_message_count(),
             main_document_status=self._main_document_status,
         )
         header.changed = header != self._last_header
@@ -511,18 +511,18 @@ class Tab:
             raise ValueError("Full-page snapshots use page.aria_snapshot(); no locator is available.")
         return (await self.resolve_target(target=target)).locator
 
-    def console_message_count(self) -> dict[str, int]:
-        messages = self._console_entries(all_messages=False)
+    async def console_message_count(self) -> dict[str, int]:
+        messages = await self._console_entries(all_messages=False)
         return {
             "total": len(messages),
             "errors": sum(message.type == "error" for message in messages),
             "warnings": sum(message.type == "warning" for message in messages),
         }
 
-    def console_messages(self, *, level: str = "info", all_messages: bool = False) -> list[str]:
+    async def console_messages(self, *, level: str = "info", all_messages: bool = False) -> list[str]:
         return [
             message.render()
-            for message in self._console_entries(all_messages=all_messages)
+            for message in await self._console_entries(all_messages=all_messages)
             if _should_include_console_message(level, message.type)
         ]
 
@@ -548,14 +548,22 @@ class Tab:
         self._console_log.stop()
         self._console_log = LogFile(self.context, file_prefix="console", title="Console")
 
-    def _console_entries(self, *, all_messages: bool) -> list[ConsoleEntry]:
-        if all_messages:
-            return list(self._console_messages)
-        return [
-            message
-            for message in self._console_messages
-            if message.navigation_index == self._navigation_index
-        ]
+    async def _console_entries(self, *, all_messages: bool) -> list[ConsoleEntry]:
+        filter_value = "all" if all_messages else "since-navigation"
+        try:
+            messages = await self.page.console_messages(filter=filter_value)
+            errors = await self.page.page_errors(filter=filter_value)
+        except (AttributeError, Error):
+            if all_messages:
+                return list(self._console_messages)
+            return [
+                message
+                for message in self._console_messages
+                if message.navigation_index == self._navigation_index
+            ]
+        entries = [self._console_entry_from_message(message) for message in messages]
+        entries.extend(self._console_entry_from_page_error(error) for error in errors)
+        return entries
 
     def _clear_collected_artifacts(self) -> None:
         self._navigation_index += 1
@@ -566,31 +574,35 @@ class Tab:
         self._console_log = LogFile(self.context, file_prefix="console", title="Console")
 
     def _on_console_message(self, message: ConsoleMessage) -> None:
+        entry = self._console_entry_from_message(message)
+        self._console_messages.append(entry)
+        self._add_log_entry({"type": "console", "message": entry})
+        self._append_console_log(entry)
+
+    def _on_page_error(self, error: Error) -> None:
+        entry = self._console_entry_from_page_error(error)
+        self._console_messages.append(entry)
+        self._add_log_entry({"type": "console", "message": entry})
+        self._append_console_log(entry)
+
+    def _console_entry_from_message(self, message: ConsoleMessage) -> ConsoleEntry:
         location = message.location
-        entry = ConsoleEntry(
+        return ConsoleEntry(
             type=message.type,
             text=message.text,
             location_url=location.get("url") or None,
             location_line=location.get("lineNumber") or location.get("line"),
             navigation_index=self._navigation_index,
         )
-        self._console_messages.append(entry)
-        self._add_log_entry({"type": "console", "message": entry})
-        self._append_console_log(entry)
 
-    def _on_page_error(self, error: Error) -> None:
-        text = str(error)
-        if not text.startswith("Error:"):
-            text = f"Error: {text}"
-        entry = ConsoleEntry(
+    def _console_entry_from_page_error(self, error: Error) -> ConsoleEntry:
+        text = getattr(error, "stack", None) or getattr(error, "message", None) or str(error)
+        return ConsoleEntry(
             type="error",
-            text=text,
+            text=str(text),
             location_url=self.page.url,
             navigation_index=self._navigation_index,
         )
-        self._console_messages.append(entry)
-        self._add_log_entry({"type": "console", "message": entry})
-        self._append_console_log(entry)
 
     def _on_request(self, request: Request) -> None:
         self._requests.append(RequestEntry(request=request))
@@ -698,6 +710,7 @@ class Tab:
         for request in requests:
             if request.existing_response is not None or request.failure is not None:
                 self._requests.append(RequestEntry(request=request))
+        await self.context.run_init_pages(self.page)
 
     async def _aria_snapshot_race(
         self,

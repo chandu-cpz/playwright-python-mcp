@@ -10,9 +10,9 @@ from playwright_python_mcp.backend.tool import tab_tool, param
 async def _handle_console_messages(context: Context, params: dict[str, Any], response: Response) -> None:
     tab = await context.ensure_tab()
     level = params.get("level", "info")
-    count = tab.console_message_count()
+    count = await tab.console_message_count()
     header = [f"Total messages: {count['total']} (Errors: {count['errors']}, Warnings: {count['warnings']})"]
-    messages = tab.console_messages(level=level, all_messages=params.get("all", False))
+    messages = await tab.console_messages(level=level, all_messages=params.get("all", False))
     if len(messages) != count["total"]:
         header.append(f'Returning {len(messages)} messages for level "{level}"')
     text = "\n".join([*header, "", *messages])

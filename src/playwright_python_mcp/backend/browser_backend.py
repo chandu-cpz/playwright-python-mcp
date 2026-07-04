@@ -6,11 +6,14 @@ import json
 import os
 import sys
 import tempfile
+import traceback
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from fastmcp.tools.base import ToolResult
+from mcp.types import CallToolResult, TextContent
 from playwright.async_api import Browser, BrowserContext as PlaywrightBrowserContext, Playwright, async_playwright
 
 from playwright_python_mcp.mcp.config import ServerConfig
@@ -18,7 +21,7 @@ from playwright_python_mcp.mcp.config import ServerConfig
 from .context import Context
 from .response import Response
 from .session_log import SessionLog
-from .tool import Tool
+from .tool import Tool, ToolValidationError
 
 if TYPE_CHECKING:
     from .extension_relay import CDPRelayServer
@@ -69,7 +72,7 @@ class BrowserBackend:
         *,
         roots: list[str] | None = None,
         meta: dict[str, Any] | None = None,
-    ) -> str | ToolResult:
+    ) -> str | ToolResult | CallToolResult:
         tool = self._tools.get(name)
         if tool is None:
             return _format_error(f'Tool "{name}" not found', json_mode=bool(meta and meta.get("json")))
@@ -78,14 +81,22 @@ class BrowserBackend:
 
         try:
             context = await self._ensure_context(cwd=client_cwd, roots=roots)
+            try:
+                parsed_args = tool.validate(args)
+            except ToolValidationError as exc:
+                return _format_error(
+                    f'Invalid arguments for tool "{name}":\n{exc}',
+                    json_mode=bool(meta and meta.get("json")),
+                )
             response = Response(
                 context,
                 tool_name=name,
-                tool_args=args,
+                tool_args=parsed_args,
                 relative_to=client_cwd,
                 raw=bool(meta and meta.get("raw")),
                 json_mode=bool(meta and meta.get("json")),
             )
+            context.set_running_tool(name)
             if _blocks_on_modal_state(context, tool):
                 if tool.clears_modal_state:
                     response.add_error(
@@ -98,23 +109,32 @@ class BrowserBackend:
                     result = _attach_close_marker(result)
                     await self.close()
                 return result
-            await tool.handler(context, args, response)
+            await tool.handler(context, parsed_args, response)
             _drain_unhandled_errors(context, response)
             result = await response.serialize()
             if self._session_log is not None:
-                await self._session_log.log_response(name, args, result)
+                await self._session_log.log_response(name, parsed_args, result)
         except ValueError as exc:
-            result = _format_error(str(exc), json_mode=bool(meta and meta.get("json")))
+            messages = [str(exc)]
+            if self._context is not None:
+                messages.extend(getattr(self._context, "drain_unhandled_errors", lambda: [])())
+            result = _format_error("\n\n".join(messages), json_mode=bool(meta and meta.get("json")))
             if self._disconnected:
                 result = _attach_close_marker(result)
                 await self.close()
             return result
         except Exception as exc:
-            result = _format_error(str(exc), json_mode=bool(meta and meta.get("json")))
+            messages = [_format_exception(exc)]
+            if self._context is not None:
+                messages.extend(getattr(self._context, "drain_unhandled_errors", lambda: [])())
+            result = _format_error("\n\n".join(messages), json_mode=bool(meta and meta.get("json")))
             if self._disconnected:
                 result = _attach_close_marker(result)
                 await self.close()
             return result
+        finally:
+            if self._context is not None:
+                self._context.set_running_tool(None)
 
         if response.is_close or self._disconnected:
             result = _attach_close_marker(result)
@@ -262,10 +282,16 @@ class BrowserBackend:
                     if isinstance(headers, dict):
                         merged.update(headers)
                     connect_kwargs["headers"] = merged
-            # serverRegistry.find() cross-version attach not yet ported; treat
-            # remoteEndpoint as a standard Playwright connect for now.
-            browser_type = getattr(self._playwright, self._config.browser_name)
-            self._browser = await browser_type.connect(connect_endpoint, **connect_kwargs)
+            descriptor = await _server_registry_find(connect_endpoint)
+            if descriptor is not None:
+                browser = descriptor.get("browser") or {}
+                browser_name = str(browser.get("browserName") or self._config.browser_name)
+                endpoint = str(descriptor.get("endpoint") or descriptor.get("pipeName") or "")
+                browser_type = getattr(self._playwright, browser_name)
+                self._browser = await browser_type.connect(endpoint)
+            else:
+                browser_type = getattr(self._playwright, self._config.browser_name)
+                self._browser = await browser_type.connect(connect_endpoint, **connect_kwargs)
             # A browser started via `launchServer` has no contexts; create one.
             if not self._browser.contexts:
                 await self._browser.new_context(**self._config.browser_context_options)
@@ -321,16 +347,22 @@ class BrowserBackend:
             launch_options["ignore_default_args"] = _persistent_ignore_default_args(
                 launch_options.get("ignore_default_args")
             )
-            self._playwright_context = await browser_type.launch_persistent_context(
-                user_data_dir,
-                **launch_options,
-                **self._config.browser_context_options,
-            )
+            try:
+                self._playwright_context = await browser_type.launch_persistent_context(
+                    user_data_dir,
+                    **launch_options,
+                    **self._config.browser_context_options,
+                )
+            except Exception as exc:
+                raise _map_browser_launch_error(exc, self._config, user_data_dir, launch_options) from exc
             browser = self._playwright_context.browser
             if browser is None:
                 raise ValueError("Persistent browser context did not expose a browser instance.")
             return browser
-        return await browser_type.launch(**launch_options)
+        try:
+            return await browser_type.launch(**launch_options)
+        except Exception as exc:
+            raise _map_browser_launch_error(exc, self._config, None, launch_options) from exc
 
     def _traces_dir(self, cwd: Path | None = None) -> Path:
         cwd = cwd or Path.cwd()
@@ -338,7 +370,11 @@ class BrowserBackend:
 
     async def _default_user_data_dir(self, cwd: Path | None = None) -> Path:
         cwd = cwd or Path.cwd()
-        cache_root = _cache_root() / "ms-playwright-mcp"
+        cache_root = (
+            Path(os.environ["PWMCP_PROFILES_DIR_FOR_TEST"])
+            if os.environ.get("PWMCP_PROFILES_DIR_FOR_TEST")
+            else _cache_root() / "ms-playwright-mcp"
+        )
         browser_token = self._config.browser_channel or self._config.browser_name
         cwd_hash = hashlib.sha256(str(cwd).encode()).hexdigest()[:7]
         user_data_dir = cache_root / f"mcp-{browser_token}-{cwd_hash}"
@@ -379,6 +415,35 @@ def _drain_unhandled_errors(context: Context, response: Response) -> None:
         response.add_error(error)
 
 
+def _format_exception(exc: Exception) -> str:
+    text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).strip()
+    return text or str(exc)
+
+
+def _map_browser_launch_error(
+    exc: Exception,
+    config: ServerConfig,
+    user_data_dir: Path | None,
+    launch_options: dict[str, Any],
+) -> Exception:
+    message = str(exc)
+    browser_name = launch_options.get("channel") or config.browser_channel or config.browser_name
+    if "Executable doesn't exist" in message:
+        target = "ffmpeg" if "ffmpeg" in message else browser_name
+        label = "FFmpeg" if target == "ffmpeg" else f'Browser "{target}"'
+        return RuntimeError(f"{label} is not installed. Run `npx @playwright/mcp install-browser {target}` to install")
+    if "cannot open shared object file: No such file or directory" in message:
+        return RuntimeError(
+            f"Missing system dependencies required to run browser {browser_name}. "
+            f"Install them with: sudo npx playwright install-deps {browser_name}"
+        )
+    if user_data_dir is not None and ("ProcessSingleton" in message or "exitCode=21" in message):
+        return RuntimeError(
+            f"Browser is already in use for {user_data_dir}, use --isolated to run multiple instances of the same browser"
+        )
+    return exc
+
+
 def _output_dir(config: ServerConfig, cwd: Path) -> Path:
     if config.output_dir is not None:
         return config.output_dir.resolve()
@@ -402,13 +467,71 @@ def _format_error(message: str, *, json_mode: bool) -> ToolResult:
     return ToolResult(content=f"### Error\n{message}", is_error=True)
 
 
-def _attach_close_marker(result: str | ToolResult) -> ToolResult:
+def _attach_close_marker(result: str | ToolResult | CallToolResult) -> CallToolResult:
+    if isinstance(result, CallToolResult):
+        data = result.model_dump(by_alias=True)
+        data["isClose"] = True
+        return CallToolResult(**data)
     if isinstance(result, ToolResult):
-        meta = dict(getattr(result, "meta", None) or {})
-        meta["isClose"] = True
-        result.meta = meta
-        return result
-    return ToolResult(content=result, meta={"isClose": True})
+        converted = result.to_mcp_result()
+        if isinstance(converted, CallToolResult):
+            data = converted.model_dump(by_alias=True)
+            data["isClose"] = True
+            return CallToolResult(**data)
+        if isinstance(converted, tuple):
+            content, structured_content = converted
+            return CallToolResult(content=content, structuredContent=structured_content, isClose=True)
+        return CallToolResult(content=converted, isClose=True)
+    return CallToolResult(content=[TextContent(type="text", text=result)], isClose=True)
+
+
+async def _server_registry_find(name: str) -> dict[str, Any] | None:
+    registry_dir = _server_registry_dir()
+    if not registry_dir.exists():
+        return None
+    for file_path in registry_dir.iterdir():
+        if not file_path.is_file():
+            continue
+        try:
+            descriptor = json.loads(file_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if descriptor.get("title") != name:
+            continue
+        if await _can_connect_to_descriptor(descriptor):
+            return descriptor
+        with suppress(OSError):
+            file_path.unlink()
+    return None
+
+
+def _server_registry_dir() -> Path:
+    if os.environ.get("PWTEST_SERVER_REGISTRY"):
+        return Path(os.environ["PWTEST_SERVER_REGISTRY"])
+    return _cache_root() / "ms-playwright" / "b"
+
+
+async def _can_connect_to_descriptor(descriptor: dict[str, Any]) -> bool:
+    endpoint = descriptor.get("endpoint") or descriptor.get("pipeName")
+    if not isinstance(endpoint, str) or not endpoint:
+        return False
+    try:
+        if endpoint.startswith(("ws://", "wss://")):
+            parsed = urlparse(endpoint)
+            if parsed.hostname is None:
+                return False
+            port = parsed.port or (443 if parsed.scheme == "wss" else 80)
+            _, writer = await asyncio.wait_for(asyncio.open_connection(parsed.hostname, port), timeout=1)
+        elif os.name != "nt":
+            _, writer = await asyncio.wait_for(asyncio.open_unix_connection(endpoint), timeout=1)
+        else:
+            return False
+        writer.close()
+        with suppress(Exception):
+            await writer.wait_closed()
+        return True
+    except Exception:
+        return False
 
 
 def _cache_root() -> Path:

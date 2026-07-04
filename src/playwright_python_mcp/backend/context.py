@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 import tempfile
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from importlib import util as importlib_util
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 from urllib.parse import urlparse
@@ -80,6 +82,7 @@ class Context:
         self.trace_legend: TraceLegend | None = None
         self._video_recording: VideoRecording | None = None
         self._pending_unhandled_errors: list[str] = []
+        self._running_tool_name: str | None = None
 
     async def initialize(self) -> None:
         self._install_exception_handler()
@@ -287,6 +290,12 @@ class Context:
         self._pending_unhandled_errors.clear()
         return errors
 
+    def is_running_tool(self) -> bool:
+        return self._running_tool_name is not None
+
+    def set_running_tool(self, name: str | None) -> None:
+        self._running_tool_name = name
+
     def track_task(self, task: asyncio.Task[Any]) -> asyncio.Task[Any]:
         task.add_done_callback(self._capture_task_exception)
         return task
@@ -302,7 +311,7 @@ class Context:
             return
         output = self.output_dir().resolve()
         workspace = self.cwd.resolve()
-        allowed_roots = [output, *(self.client_roots or [workspace])]
+        allowed_roots = [output, workspace]
         if not any(_is_relative_to(resolved, root.resolve()) for root in allowed_roots):
             roots_text = ", ".join(str(root) for root in allowed_roots)
             raise ValueError(f"File access denied: {resolved} is outside allowed roots. Allowed roots: {roots_text}")
@@ -357,7 +366,8 @@ class Context:
             suffix = f"-{index}"
             file_name = file_name.with_name(f"{file_name.stem}{suffix}{file_name.suffix}")
         recording.file_names.append(file_name)
-        await page.screencast.start(path=file_name, size=recording.params.get("size"))
+        params = {key: value for key, value in recording.params.items() if value is not None}
+        await page.screencast.start(path=file_name, **params)
 
     def _tab_for_page(self, page: Any) -> Tab | None:
         return next((tab for tab in self._tabs if tab.page is page), None)
@@ -381,6 +391,10 @@ class Context:
         if exception is not None:
             self._pending_unhandled_errors.append(str(exception))
 
+    async def run_init_pages(self, page: Page) -> None:
+        for init_page in self.config.init_pages:
+            await _run_init_page(init_page, page)
+
 
 def _is_relative_to(path: Path, parent: Path) -> bool:
     try:
@@ -388,6 +402,27 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+async def _run_init_page(init_page: Path, page: Page) -> None:
+    try:
+        module_name = f"_playwright_mcp_init_page_{abs(hash(init_page))}"
+        spec = importlib_util.spec_from_file_location(module_name, init_page)
+        if spec is None or spec.loader is None:
+            raise RuntimeError("Could not load module spec")
+        module = importlib_util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        func = getattr(module, "init_page", None)
+        if func is None:
+            func = getattr(module, "default", None)
+        if not callable(func):
+            raise RuntimeError('Expected callable "init_page" or "default"')
+        result = func(page)
+        if inspect.isawaitable(result):
+            await result
+    except Exception as exc:
+        reason = str(exc)
+        raise RuntimeError(f'Failed to load init page "{init_page}": {reason}') from exc
 
 
 async def _abort_route(route: Any) -> None:

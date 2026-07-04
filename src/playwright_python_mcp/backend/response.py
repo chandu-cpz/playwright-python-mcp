@@ -99,9 +99,6 @@ class Response:
         return await self._context.workspace_file(filename, self._client_workspace)
 
     async def add_file_result(self, resolved_file: ResolvedFile, data: bytes | str | None) -> None:
-        if _output_mode(self._context) == "stdout" and isinstance(data, str) and not resolved_file.explicit:
-            self.add_text_result(data)
-            return
         await self._write_file(resolved_file, data)
         self.add_text_result(resolved_file.printable_link)
 
@@ -183,16 +180,14 @@ class Response:
 
         if tab_snapshot is not None and self._snapshot_request is not None and self._snapshot_request.mode != "none":
             should_write_snapshot = (
-                self._snapshot_request.file_name is not None
-                or (
-                    self._snapshot_request.mode != "explicit"
-                    and _output_mode(self._context) == "file"
-                )
+                self._snapshot_request.mode != "explicit" or self._snapshot_request.file_name is not None
             )
             if should_write_snapshot:
                 from .context import FilenameTemplate
 
                 suggested_filename = self._snapshot_request.file_name
+                if suggested_filename == "<auto>":
+                    suggested_filename = None
                 resolved_file = await self.resolve_client_file(
                     FilenameTemplate(prefix="page", ext="yml", suggested_filename=suggested_filename),
                     "Snapshot",
@@ -215,13 +210,12 @@ class Response:
         text = self._serialize_sections(sections)
         is_error = any(section[3] for section in sections)
         if is_error:
-            return ToolResult(content=text, is_error=True, meta=_result_meta(self._is_close))
+            return ToolResult(content=text, is_error=True)
         if self._image_results and self._context.config.image_responses != "omit":
             return ToolResult(
                 content=[TextContent(type="text", text=text), *self._image_content()],
-                meta=_result_meta(self._is_close),
             )
-        return ToolResult(content=text, meta=_result_meta(self._is_close))
+        return ToolResult(content=text)
 
     def _image_content(self) -> list[ImageContent]:
         import base64
@@ -255,7 +249,7 @@ class Response:
                         payload[key] = "\n".join(content)
                 else:
                     payload[key] = "\n".join(content)
-            return self._context.redact_secrets(json.dumps(payload, indent=2))
+            return sanitize_unicode(self._context.redact_secrets(json.dumps(payload, indent=2)))
 
         rendered: list[str] = []
         for title, content, codeframe, _is_error in sections:
@@ -270,7 +264,7 @@ class Response:
             rendered.extend(content)
             if codeframe:
                 rendered.append("```")
-        return "\n".join(self._context.redact_secrets("\n".join(rendered)).splitlines())
+        return sanitize_unicode("\n".join(self._context.redact_secrets("\n".join(rendered)).splitlines()))
 
     def _filter_sections(
         self,
@@ -400,12 +394,6 @@ def render_modal_states(modal_states: list[dict[str, object]]) -> list[str]:
     ]
 
 
-def _result_meta(is_close: bool) -> dict[str, object] | None:
-    if not is_close:
-        return None
-    return {"isClose": True}
-
-
 def scale_image_to_fit_message(data: bytes, image_type: str) -> bytes:
     with Image.open(BytesIO(data)) as image:
         width, height = image.size
@@ -433,5 +421,5 @@ def _snapshot_mode(value: str) -> Literal["none", "full"]:
     return "none" if value == "none" else "full"
 
 
-def _output_mode(context: Context) -> Literal["file", "stdout"]:
-    return "stdout" if getattr(context.config, "output_mode", "file") == "stdout" else "file"
+def sanitize_unicode(text: str) -> str:
+    return text.encode("utf-16", "surrogatepass").decode("utf-16", "replace")

@@ -235,7 +235,7 @@ The tag publish workflow runs both the Python gates and the adapted upstream con
 ## Known Limitations
 
 - `browser_annotate` is intentionally not exposed. Upstream implements it through the Node.js Playwright Dashboard daemon; this port does not ship that daemon. A Python-native equivalent may be added later if the dashboard workflow is ported.
-- `browser.initPage` / `--init-page` is rejected at config load time. Upstream loads a JavaScript module and calls its default export against each new page; this Python package does not silently ignore those modules.
+- `browser.initPage` / `--init-page` uses a Python-native module contract: define `init_page(page)` or `default(page)`. Upstream uses JavaScript modules; this is a language-level porting divergence.
 - `browser_run_code_unsafe` intentionally executes Python Playwright code instead of upstream JavaScript snippets. Generated snippets in this port are Python-native, and this unsafe execution tool follows that Python runtime contract.
 - HTTP transport creates a backend per MCP session by default. `sharedBrowserContext` intentionally shares a backend context across sessions; isolated mode keeps separate Python backends per session rather than sharing only the browser process.
 - HTTP transport implements upstream's `/killkillkill` shutdown endpoint, but does not yet implement the periodic MCP heartbeat ping. Stdio transport has signal cleanup.

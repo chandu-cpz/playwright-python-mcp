@@ -12,8 +12,7 @@ import anyio
 from fastmcp import FastMCP
 from fastmcp.server.context import Context as FastMCPContext
 from fastmcp.server.middleware import CallNext, Middleware as FastMCPMiddleware, MiddlewareContext
-from fastmcp.tools.base import ToolResult
-from mcp.types import CallToolResult, ToolAnnotations
+from mcp.types import ToolAnnotations
 from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
@@ -248,12 +247,6 @@ def _make_fastmcp_handler(backend_pool: BackendPool, tool_name: str):
         if backend.is_closed:
             await backend_pool.close(session_id)
 
-        if isinstance(result, ToolResult) and result.meta and result.meta.get("isClose"):
-            mcp_result = result.to_mcp_result()
-            if isinstance(mcp_result, CallToolResult):
-                meta = mcp_result.meta or {}
-                meta.pop("isClose", None)
-                return _call_tool_result_with_is_close(mcp_result)
         return result
 
     return handler
@@ -272,16 +265,6 @@ def _package_version() -> str:
 
 async def _tool_handler(**_kwargs: Any):
     raise RuntimeError("unreachable")
-
-
-def _call_tool_result_with_is_close(result: CallToolResult) -> CallToolResult:
-    """Return a new CallToolResult with isClose promoted to a top-level field."""
-    return CallToolResult(
-        content=result.model_dump().get("content"),
-        structuredContent=result.model_dump().get("structuredContent"),
-        isError=bool(result.model_dump().get("isError")),
-        isClose=True,
-    )
 
 
 async def _list_roots(ctx: FastMCPContext | None) -> list[str] | None:
