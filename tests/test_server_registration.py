@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+import re
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -9,7 +10,7 @@ from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
 from playwright_python_mcp.backend.session_log import SessionLog
 from playwright_python_mcp.backend.tab import TabHeader, TabSnapshot
-from playwright_python_mcp.backend.tools import filtered_tools
+from playwright_python_mcp.backend.tools import IMPLEMENTED_TOOLS, filtered_tools
 from playwright_python_mcp.mcp.config import load_config
 from playwright_python_mcp.mcp.server import create_server
 
@@ -25,6 +26,30 @@ def _config():
     )
 
 
+def _parse_upstream_tool_metadata() -> dict[str, tuple[str, str]]:
+    backend_dir = Path("upstream/playwright/packages/playwright-core/src/tools/backend")
+    text = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(backend_dir.glob("*.ts"))
+    )
+    pattern = re.compile(
+        r"name:\s*'(?P<name>browser_[^']+)'\s*,\s*title:\s*(?P<title>'[^']*'|`[^`]*`)\s*,\s*description:\s*(?P<description>'[^']*'|`[^`]*`)",
+        re.S,
+    )
+
+    def normalize(value: str) -> str:
+        return value[1:-1].replace(
+            "${verifyElement.schema.name}", "browser_verify_element_visible"
+        )
+
+    return {
+        match.group("name"): (
+            normalize(match.group("title")),
+            normalize(match.group("description")),
+        )
+        for match in pattern.finditer(text)
+    }
+
+
 def test_fastmcp_registration_is_non_threaded_and_has_metadata() -> None:
     async def run() -> None:
         server = create_server(_config())
@@ -33,11 +58,28 @@ def test_fastmcp_registration_is_non_threaded_and_has_metadata() -> None:
 
         assert tool.run_in_thread is False
         assert tool.title == "Click"
-        assert tool.description
+        assert tool.description == "Perform click on a web page"
         assert tool.annotations is not None
         assert tool.annotations.openWorldHint is True
 
     asyncio.run(run())
+
+
+def test_implemented_tool_metadata_matches_upstream_backend_definitions() -> None:
+    upstream_metadata = _parse_upstream_tool_metadata()
+    tools = {tool.name: tool for tool in IMPLEMENTED_TOOLS}
+
+    for name, tool in tools.items():
+        assert name in upstream_metadata, name
+        expected_title, expected_description = upstream_metadata[name]
+        assert tool.title == expected_title, name
+        if name == "browser_run_code_unsafe":
+            assert (
+                tool.description
+                == "Run a Python Playwright code snippet. Unsafe: executes arbitrary Python in the Playwright server process with normal builtins/imports and is RCE-equivalent."
+            )
+            continue
+        assert tool.description == expected_description, name
 
 
 def test_fastmcp_read_only_annotations_match_tool_surface() -> None:
@@ -182,12 +224,20 @@ def test_response_does_not_capture_aria_snapshot_without_request(tmp_path) -> No
     async def run() -> None:
         tab = FakeTab()
         context = FakeContext(tab, tmp_path)
-        response = Response(cast(Context, context), tool_name="browser_console_messages", tool_args={})
+        response = Response(
+            cast(Context, context), tool_name="browser_console_messages", tool_args={}
+        )
         response.add_text_result("ok")
 
         await response.serialize()
 
-        assert tab.capture_kwargs == {"target": None, "depth": None, "boxes": None, "relative_to": tmp_path, "include_aria": False}
+        assert tab.capture_kwargs == {
+            "target": None,
+            "depth": None,
+            "boxes": None,
+            "relative_to": tmp_path,
+            "include_aria": False,
+        }
 
     asyncio.run(run())
 
@@ -196,7 +246,9 @@ def test_explicit_snapshot_is_inline_by_default(tmp_path: Path) -> None:
     async def run() -> None:
         tab = FakeTab(aria_snapshot='- button "Submit" [ref=e1]')
         context = FakeContext(tab, tmp_path, snapshot_mode="full")
-        response = Response(cast(Context, context), tool_name="browser_snapshot", tool_args={})
+        response = Response(
+            cast(Context, context), tool_name="browser_snapshot", tool_args={}
+        )
         response.set_include_full_snapshot()
 
         result = await response.serialize()
@@ -214,7 +266,9 @@ def test_action_snapshot_uses_file_for_full_mode(tmp_path: Path) -> None:
     async def run() -> None:
         tab = FakeTab(aria_snapshot='- button "Submit" [ref=e1]')
         context = FakeContext(tab, tmp_path, snapshot_mode="full", output_mode="file")
-        response = Response(cast(Context, context), tool_name="browser_click", tool_args={})
+        response = Response(
+            cast(Context, context), tool_name="browser_click", tool_args={}
+        )
         response.set_include_snapshot()
 
         result = await response.serialize()
@@ -222,7 +276,9 @@ def test_action_snapshot_uses_file_for_full_mode(tmp_path: Path) -> None:
         assert isinstance(result, str)
         assert "[Snapshot](" in result
         assert "```yaml" not in result
-        assert (tmp_path / "page.yml").read_text(encoding="utf-8") == '- button "Submit" [ref=e1]'
+        assert (tmp_path / "page.yml").read_text(
+            encoding="utf-8"
+        ) == '- button "Submit" [ref=e1]'
 
     asyncio.run(run())
 
@@ -231,7 +287,9 @@ def test_action_snapshot_uses_inline_yaml_for_stdout_mode(tmp_path: Path) -> Non
     async def run() -> None:
         tab = FakeTab(aria_snapshot='- button "Submit" [ref=e1]')
         context = FakeContext(tab, tmp_path, snapshot_mode="full", output_mode="stdout")
-        response = Response(cast(Context, context), tool_name="browser_click", tool_args={})
+        response = Response(
+            cast(Context, context), tool_name="browser_click", tool_args={}
+        )
         response.set_include_snapshot()
 
         result = await response.serialize()
@@ -249,8 +307,12 @@ def test_stdout_mode_returns_text_file_results_inline(tmp_path: Path) -> None:
         from playwright_python_mcp.backend.context import FilenameTemplate
 
         context = FakeContext(FakeTab(), tmp_path, output_mode="stdout")
-        response = Response(cast(Context, context), tool_name="browser_console_messages", tool_args={})
-        resolved = await response.resolve_client_file(FilenameTemplate(prefix="console", ext="log"), "Console")
+        response = Response(
+            cast(Context, context), tool_name="browser_console_messages", tool_args={}
+        )
+        resolved = await response.resolve_client_file(
+            FilenameTemplate(prefix="console", ext="log"), "Console"
+        )
         await response.add_file_result(resolved, "hello")
 
         result = await response.serialize()
@@ -267,7 +329,9 @@ def test_action_snapshot_respects_none_mode(tmp_path: Path) -> None:
     async def run() -> None:
         tab = FakeTab(aria_snapshot='- button "Submit" [ref=e1]')
         context = FakeContext(tab, tmp_path, snapshot_mode="none")
-        response = Response(cast(Context, context), tool_name="browser_click", tool_args={})
+        response = Response(
+            cast(Context, context), tool_name="browser_click", tool_args={}
+        )
         response.set_include_snapshot()
 
         result = await response.serialize()
@@ -283,7 +347,9 @@ def test_raw_response_only_emits_result_snapshot_sections(tmp_path: Path) -> Non
     async def run() -> None:
         tab = FakeTab(aria_snapshot='- button "Submit" [ref=e1]')
         context = FakeContext(tab, tmp_path, snapshot_mode="full", output_mode="stdout")
-        response = Response(cast(Context, context), tool_name="browser_click", tool_args={}, raw=True)
+        response = Response(
+            cast(Context, context), tool_name="browser_click", tool_args={}, raw=True
+        )
         response.add_text_result("ok")
         response.add_code("await page.click()")
         response.set_include_snapshot()
@@ -303,7 +369,12 @@ def test_json_response_serializes_sections(tmp_path: Path) -> None:
     async def run() -> None:
         tab = FakeTab(aria_snapshot='- button "Submit" [ref=e1]')
         context = FakeContext(tab, tmp_path, snapshot_mode="full", output_mode="stdout")
-        response = Response(cast(Context, context), tool_name="browser_click", tool_args={}, json_mode=True)
+        response = Response(
+            cast(Context, context),
+            tool_name="browser_click",
+            tool_args={},
+            json_mode=True,
+        )
         response.add_text_result("ok")
         response.set_include_snapshot()
 
@@ -324,7 +395,9 @@ def test_response_includes_paused_debugger_section(tmp_path: Path) -> None:
             "title": "Paused on breakpoint",
             "location": {"file": str(tmp_path / "example.py"), "line": 12},
         }
-        response = Response(cast(Context, context), tool_name="browser_snapshot", tool_args={})
+        response = Response(
+            cast(Context, context), tool_name="browser_snapshot", tool_args={}
+        )
 
         result = await response.serialize()
 
@@ -342,7 +415,7 @@ def test_session_log_writes_markdown_summary(tmp_path: Path) -> None:
         await session_log.log_response(
             "browser_snapshot",
             {"filename": "page.yml"},
-            "### Result\nok\n### Snapshot\n```yaml\n- button \"Submit\" [ref=e1]\n```",
+            '### Result\nok\n### Snapshot\n```yaml\n- button "Submit" [ref=e1]\n```',
         )
 
         content = (tmp_path / "session-1" / "session.md").read_text(encoding="utf-8")
@@ -364,11 +437,24 @@ class FakeTab:
         return TabSnapshot(aria_snapshot=self._aria_snapshot)
 
     async def header_snapshot(self) -> TabHeader:
-        return TabHeader(title="title", url="about:blank", current=True, crashed=False, console={"total": 0, "errors": 0, "warnings": 0})
+        return TabHeader(
+            title="title",
+            url="about:blank",
+            current=True,
+            crashed=False,
+            console={"total": 0, "errors": 0, "warnings": 0},
+        )
 
 
 class FakeContext:
-    def __init__(self, tab: FakeTab, cwd: Path, *, snapshot_mode: str = "none", output_mode: str = "stdout") -> None:
+    def __init__(
+        self,
+        tab: FakeTab,
+        cwd: Path,
+        *,
+        snapshot_mode: str = "none",
+        output_mode: str = "stdout",
+    ) -> None:
         self.cwd = cwd
         self.debugger = FakeDebugger()
         self.config = SimpleNamespace(
@@ -409,7 +495,9 @@ class FakeDebugger:
 def test_killkillkill_endpoint_is_registered_on_http_app() -> None:
     server = create_server(_config())
     http = server.app.http_app()
-    kill_routes = [route for route in http.routes if getattr(route, "path", "") == "/killkillkill"]
+    kill_routes = [
+        route for route in http.routes if getattr(route, "path", "") == "/killkillkill"
+    ]
     assert len(kill_routes) == 1
 
 
@@ -417,7 +505,9 @@ def test_killkillkill_endpoint_requires_post_and_header() -> None:
     async def run() -> None:
         server = create_server(_config())
 
-        missing_header = await _call_http_app(server.app.http_app(), method="POST", headers=[])
+        missing_header = await _call_http_app(
+            server.app.http_app(), method="POST", headers=[]
+        )
         wrong_method = await _call_http_app(
             server.app.http_app(),
             method="GET",
@@ -462,7 +552,9 @@ def test_trigger_shutdown_cancels_active_scope() -> None:
     anyio.run(run)
 
 
-async def _call_http_app(app: Any, *, method: str, headers: list[tuple[bytes, bytes]]) -> tuple[int, str]:
+async def _call_http_app(
+    app: Any, *, method: str, headers: list[tuple[bytes, bytes]]
+) -> tuple[int, str]:
     messages: list[dict[str, Any]] = []
 
     async def receive() -> dict[str, Any]:
@@ -488,6 +580,12 @@ async def _call_http_app(app: Any, *, method: str, headers: list[tuple[bytes, by
         receive,
         send,
     )
-    start = next(message for message in messages if message["type"] == "http.response.start")
-    body = b"".join(message.get("body", b"") for message in messages if message["type"] == "http.response.body")
+    start = next(
+        message for message in messages if message["type"] == "http.response.start"
+    )
+    body = b"".join(
+        message.get("body", b"")
+        for message in messages
+        if message["type"] == "http.response.body"
+    )
     return int(start["status"]), body.decode("utf-8")
