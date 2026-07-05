@@ -227,7 +227,16 @@ class BrowserBackend:
             if not self._config.browser_isolated and self._browser.contexts:
                 browser_context = self._browser.contexts[0]
             else:
-                browser_context = await self._browser.new_context(**self._config.browser_context_options)
+                if self._config.browser_provider == "camoufox":
+                    camoufox_async_api = importlib.import_module("camoufox.async_api")
+                    async_new_context = camoufox_async_api.AsyncNewContext
+                    browser_context = await async_new_context(
+                        self._browser,
+                        **self._config.camoufox_options,
+                        **self._config.browser_context_options,
+                    )
+                else:
+                    browser_context = await self._browser.new_context(**self._config.browser_context_options)
         self._register_disconnect_listeners(browser_context)
         if self._config.action_timeout is not None:
             browser_context.set_default_timeout(self._config.action_timeout)
@@ -406,12 +415,16 @@ class BrowserBackend:
                     "use --isolated to run multiple instances of the same browser"
                 )
             try:
+                combined_opts = {
+                    **launch_options,
+                    **self._config.browser_context_options,
+                    **camoufox_options
+                }
                 self._playwright_context = await async_new_browser(
                     self._playwright,
                     persistent_context=True,
                     user_data_dir=str(user_data_dir),
-                    **launch_options,
-                    **camoufox_options,
+                    **combined_opts,
                 )
             except Exception as exc:
                 raise _map_browser_launch_error(exc, self._config, user_data_dir, launch_options) from exc
