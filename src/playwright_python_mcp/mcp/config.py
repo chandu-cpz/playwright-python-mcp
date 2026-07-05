@@ -4,7 +4,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -51,10 +51,12 @@ class ServerConfig:
     navigation_timeout: int | None = 60000
     expect_timeout: int | None = 5000
     public_config: dict[str, Any] = field(default_factory=dict)
+    browser_provider: Literal["playwright", "camoufox"] = "playwright"
     browser_name: str = "chromium"
     browser_channel: str | None = "chrome"
     browser_launch_options: dict[str, Any] = field(default_factory=dict)
     browser_context_options: dict[str, Any] = field(default_factory=dict)
+    camoufox_options: dict[str, Any] = field(default_factory=dict)
     browser_isolated: bool | None = None
     browser_user_data_dir: Path | None = None
     cdp_endpoint: str | None = None
@@ -130,7 +132,19 @@ def _config_from_cli(
     output_dir: Path | None,
     **options: Any,
 ) -> dict[str, Any]:
-    browser_name, channel = _resolve_browser_param(browser)
+    browser_provider: Literal["playwright", "camoufox"] | None = None
+    browser_name: str | None
+    channel: str | None
+    if browser == "camoufox":
+        browser_provider = "camoufox"
+        browser_name, channel = "firefox", None
+    elif browser is not None:
+        browser_provider = "playwright"
+        browser_name, channel = _resolve_browser_param(browser)
+        if browser_name is None and channel is None:
+            raise ValueError(f'Unsupported browser "{browser}".')
+    else:
+        browser_name, channel = None, None
     launch_options: dict[str, Any] = {
         "channel": channel,
         "executablePath": options.get("executable_path"),
@@ -170,6 +184,7 @@ def _config_from_cli(
             "browser": _strip_undefined(
                 {
                     "browserName": browser_name,
+                    "provider": browser_provider,
                     "isolated": options.get("isolated"),
                     "userDataDir": str(options["user_data_dir"]) if options.get("user_data_dir") else None,
                     "launchOptions": _strip_undefined(launch_options),
@@ -300,11 +315,28 @@ def _validate_and_complete(config: dict[str, Any]) -> None:
     browser = config.setdefault("browser", {})
     launch_options = browser.setdefault("launchOptions", {})
     context_options = browser.setdefault("contextOptions", {})
+    provider = browser.get("provider") or "playwright"
+    if provider not in {"playwright", "camoufox"}:
+        raise ValueError('browser.provider must be one of "playwright" or "camoufox"')
     if browser.get("isolated") and browser.get("userDataDir"):
         raise ValueError("Browser userDataDir is not supported in isolated mode.")
-    browser_name, default_channel = _resolve_browser_param(None)
-    browser["browserName"] = browser.get("browserName") or browser_name
-    if launch_options.get("channel") is None and browser.get("browserName") == "chromium":
+    if provider == "camoufox":
+        browser["browserName"] = browser.get("browserName") or "firefox"
+        if browser.get("browserName") != "firefox":
+            raise ValueError('Camoufox provider requires browser.browserName to be "firefox".')
+        if browser.get("cdpEndpoint"):
+            raise ValueError("Camoufox provider does not support browser.cdpEndpoint.")
+        if config.get("extension"):
+            raise ValueError("Camoufox provider does not support extension mode.")
+        if launch_options.get("channel"):
+            raise ValueError("Camoufox provider does not support browser.launchOptions.channel.")
+        if launch_options.get("executablePath"):
+            raise ValueError("Camoufox provider does not support browser.launchOptions.executablePath.")
+        browser["provider"] = provider
+    else:
+        browser_name, default_channel = _resolve_browser_param(None)
+        browser["browserName"] = browser.get("browserName") or browser_name
+    if provider != "camoufox" and launch_options.get("channel") is None and browser.get("browserName") == "chromium":
         launch_options["channel"] = default_channel
     if launch_options.get("headless") is None:
         launch_options["headless"] = os.name == "posix" and not os.environ.get("DISPLAY")
@@ -319,7 +351,7 @@ def _validate_and_complete(config: dict[str, Any]) -> None:
         if not any(str(arg).startswith("--disable-blink-features") for arg in args):
             args.append("--disable-blink-features=AutomationControlled")
         launch_options["args"] = args
-    if context_options.get("viewport") is None:
+    if provider != "camoufox" and context_options.get("viewport") is None:
         context_options["viewport"] = {"width": 1280, "height": 720} if launch_options.get("headless") else None
     console = config.setdefault("console", {})
     if console.get("level") not in {None, "error", "warning", "info", "debug"}:
@@ -359,10 +391,12 @@ def _server_config_from_merged(config: dict[str, Any]) -> ServerConfig:
         navigation_timeout=timeouts.get("navigation"),
         expect_timeout=timeouts.get("expect"),
         public_config=config,
+        browser_provider=browser.get("provider") or "playwright",
         browser_name=str(browser.get("browserName") or "chromium"),
         browser_channel=launch_options.get("channel"),
         browser_launch_options=_to_python_launch_options(launch_options),
         browser_context_options=_to_python_context_options(context_options),
+        camoufox_options=dict(browser.get("camoufoxOptions") or {}),
         browser_isolated=browser.get("isolated"),
         browser_user_data_dir=Path(browser["userDataDir"]) if browser.get("userDataDir") else None,
         cdp_endpoint=browser.get("cdpEndpoint"),

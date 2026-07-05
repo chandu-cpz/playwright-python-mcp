@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+import types
 from pathlib import Path
 from typing import Any, cast
 from collections.abc import Callable
@@ -15,10 +17,10 @@ from playwright_python_mcp.mcp.config import load_config
 
 def _config(**options: Any):
     return load_config(
-        browser=None,
+        browser=options.pop("browser", None),
         caps="",
-        config_path=None,
-        headless=True,
+        config_path=options.pop("config_path", None),
+        headless=options.pop("headless", True),
         test_id_attribute="data-testid",
         vision=False,
         **options,
@@ -54,6 +56,85 @@ def test_isolated_launch_uses_ephemeral_browser() -> None:
 
         assert playwright.chromium.launch_called is True
         assert playwright.chromium.persistent_user_data_dir is None
+
+    asyncio.run(run())
+
+
+def test_camoufox_default_launch_uses_persistent_context(monkeypatch, tmp_path: Path) -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def async_new_browser(playwright: Any, **options: Any) -> object:
+        calls.append({"playwright": playwright, **options})
+        return FakePersistentContext()
+
+    async_api = types.ModuleType("camoufox.async_api")
+    setattr(async_api, "AsyncNewBrowser", async_new_browser)
+    camoufox = types.ModuleType("camoufox")
+    monkeypatch.setitem(sys.modules, "camoufox", camoufox)
+    monkeypatch.setitem(sys.modules, "camoufox.async_api", async_api)
+
+    async def run() -> None:
+        monkeypatch.setenv("PWMCP_PROFILES_DIR_FOR_TEST", str(tmp_path / "profiles"))
+        backend = BrowserBackend(
+            _config(
+                browser="camoufox",
+                headless=True,
+                config_path=None,
+            ),
+            [],
+        )
+        playwright = FakePlaywright()
+        backend._playwright = cast(Any, playwright)
+
+        browser = await backend._launch_browser(tmp_path)
+
+        assert browser is FakePersistentContext.browser
+        assert len(calls) == 1
+        assert calls[0]["playwright"] is playwright
+        assert calls[0]["persistent_context"] is True
+        assert Path(calls[0]["user_data_dir"]).name.startswith("mcp-firefox-")
+        assert calls[0]["headless"] is True
+        assert calls[0]["handle_sigint"] is False
+        assert calls[0]["handle_sigterm"] is False
+
+    asyncio.run(run())
+
+
+def test_camoufox_isolated_launch_uses_non_persistent_browser(monkeypatch, tmp_path: Path) -> None:
+    calls: list[dict[str, Any]] = []
+    fake_browser = object()
+
+    async def async_new_browser(playwright: Any, **options: Any) -> object:
+        calls.append({"playwright": playwright, **options})
+        return fake_browser
+
+    async_api = types.ModuleType("camoufox.async_api")
+    setattr(async_api, "AsyncNewBrowser", async_new_browser)
+    camoufox = types.ModuleType("camoufox")
+    monkeypatch.setitem(sys.modules, "camoufox", camoufox)
+    monkeypatch.setitem(sys.modules, "camoufox.async_api", async_api)
+
+    async def run() -> None:
+        backend = BrowserBackend(
+            _config(
+                browser="camoufox",
+                isolated=True,
+                headless=True,
+                config_path=None,
+            ),
+            [],
+        )
+        playwright = FakePlaywright()
+        backend._playwright = cast(Any, playwright)
+
+        browser = await backend._launch_browser(tmp_path)
+
+        assert browser is fake_browser
+        assert len(calls) == 1
+        assert calls[0]["playwright"] is playwright
+        assert calls[0]["persistent_context"] is False
+        assert "user_data_dir" not in calls[0]
+        assert calls[0]["headless"] is True
 
     asyncio.run(run())
 
@@ -328,6 +409,12 @@ class FakeContext:
     def configure_client(self, *, roots: list[Path] | None = None, cwd: Path | None = None) -> None:
         if cwd is not None:
             self.cwd = cwd
+
+    def set_running_tool(self, name: str | None) -> None:
+        pass
+
+    def drain_unhandled_errors(self) -> list[str]:
+        return []
 
     def redact_secrets(self, text: str) -> str:
         return text

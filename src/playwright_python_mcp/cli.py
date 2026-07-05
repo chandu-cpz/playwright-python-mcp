@@ -123,7 +123,13 @@ def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    if args.browser == "camoufox" and args.channel:
+        parser.error("--browser camoufox cannot be combined with --channel.")
+
     if args.command == "install-browser":
+        if args.browsers == ["camoufox"]:
+            cmd = [sys.executable, "-m", "camoufox", "fetch"]
+            raise SystemExit(subprocess.call(cmd))
         cmd = [sys.executable, "-m", "playwright", "install", *args.browsers]
         raise SystemExit(subprocess.call(cmd))
 

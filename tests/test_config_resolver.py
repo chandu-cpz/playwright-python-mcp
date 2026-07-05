@@ -100,6 +100,135 @@ def test_remote_endpoint_headers_are_preserved() -> None:
     assert config.as_public_dict()["browser"]["remoteHeaders"] == {"Authorization": "Bearer token"}
 
 
+def test_browser_camoufox_selects_camoufox_provider_without_chromium_defaults() -> None:
+    config = load_config(
+        browser="camoufox",
+        caps="config",
+        config_path=None,
+        headless=True,
+        test_id_attribute="data-testid",
+        vision=False,
+    )
+
+    public = config.as_public_dict()
+    assert config.browser_provider == "camoufox"
+    assert config.browser_name == "firefox"
+    assert config.browser_channel is None
+    assert public["browser"]["provider"] == "camoufox"
+    assert public["browser"]["browserName"] == "firefox"
+    assert "channel" not in public["browser"]["launchOptions"]
+    assert "chromiumSandbox" not in public["browser"]["launchOptions"]
+    assert "args" not in public["browser"]["launchOptions"]
+    assert "viewport" not in public["browser"]["contextOptions"]
+
+
+def test_camoufox_options_are_preserved_from_config_file(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    config_file.write_text(
+        """
+        {
+          "browser": {
+            "provider": "camoufox",
+            "camoufoxOptions": {
+              "humanize": true,
+              "headless": "virtual",
+              "geoip": true,
+              "block_webrtc": true
+            }
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    config = load_config(
+        browser=None,
+        caps="config",
+        config_path=config_file,
+        headless=None,
+        test_id_attribute="data-testid",
+        vision=False,
+    )
+
+    assert config.browser_provider == "camoufox"
+    assert config.browser_name == "firefox"
+    assert config.camoufox_options == {
+        "humanize": True,
+        "headless": "virtual",
+        "geoip": True,
+        "block_webrtc": True,
+    }
+    assert config.browser_context_options == {}
+
+
+def test_unknown_browser_does_not_fall_back_to_chrome() -> None:
+    try:
+        load_config(
+            browser="camoufox-typo",
+            caps="config",
+            config_path=None,
+            headless=True,
+            test_id_attribute="data-testid",
+            vision=False,
+        )
+    except ValueError as exc:
+        assert 'Unsupported browser "camoufox-typo"' in str(exc)
+    else:
+        raise AssertionError("Expected unsupported browser validation error")
+
+
+def test_camoufox_rejects_unsupported_combinations(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    config_file.write_text(
+        '{"browser": {"provider": "camoufox", "launchOptions": {"channel": "chrome"}}}',
+        encoding="utf-8",
+    )
+
+    try:
+        load_config(
+            browser=None,
+            caps="config",
+            config_path=config_file,
+            headless=True,
+            test_id_attribute="data-testid",
+            vision=False,
+        )
+    except ValueError as exc:
+        assert "does not support browser.launchOptions.channel" in str(exc)
+    else:
+        raise AssertionError("Expected unsupported Camoufox channel validation error")
+
+    try:
+        load_config(
+            browser="camoufox",
+            caps="config",
+            config_path=None,
+            headless=True,
+            test_id_attribute="data-testid",
+            vision=False,
+            cdp_endpoint="http://127.0.0.1:9222",
+        )
+    except ValueError as exc:
+        assert "does not support browser.cdpEndpoint" in str(exc)
+    else:
+        raise AssertionError("Expected unsupported Camoufox CDP validation error")
+
+    try:
+        load_config(
+            browser="camoufox",
+            caps="config",
+            config_path=None,
+            headless=True,
+            test_id_attribute="data-testid",
+            vision=False,
+            extension=True,
+        )
+    except ValueError as exc:
+        assert "does not support extension mode" in str(exc)
+    else:
+        raise AssertionError("Expected unsupported Camoufox extension validation error")
+
+
 def test_save_session_config_is_preserved() -> None:
     config = load_config(
         browser=None,

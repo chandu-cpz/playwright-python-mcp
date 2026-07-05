@@ -47,6 +47,12 @@ Install browser binaries when needed:
 uv run playwright-python-mcp install-browser chromium
 ```
 
+Camoufox is optional and uses its own browser fetch path:
+
+```bash
+uvx --from 'playwright-python-mcp[camoufox]' playwright-python-mcp install-browser camoufox
+```
+
 ## MCP Client Config
 
 Most MCP clients can use stdio:
@@ -120,7 +126,7 @@ Useful flags:
 
 | Option | Purpose |
 | --- | --- |
-| `--browser` | Browser engine or channel. |
+| `--browser` | Browser engine, channel, or optional provider such as `camoufox`. |
 | `--headless` | Run browser headlessly. |
 | `--caps` | Enable additional capability families such as `vision`, `pdf`, `storage`, `testing`, `config`, `network`, `tracing`, or `devtools`. |
 | `--cdp-endpoint` | Connect to an existing Chromium browser over CDP. |
@@ -174,6 +180,30 @@ uvx --from 'playwright-python-mcp[extension]' playwright-python-mcp --extension
 ```
 
 `--extension` starts a local Python CDP relay and opens the Playwright browser extension connect page. The Playwright Extension must already be installed in the selected Chrome or Edge profile. The relay dependency is optional, so published installs need the `extension` extra.
+
+Camoufox provider mode:
+
+```bash
+uvx --from 'playwright-python-mcp[camoufox]' playwright-python-mcp --browser camoufox --headless
+```
+
+`--browser camoufox` launches through `camoufox.async_api.AsyncNewBrowser`, not Playwright Firefox with `--executable-path`. Non-isolated mode keeps the normal persistent-profile behavior; `--isolated` launches a non-persistent Camoufox browser and creates a fresh context. CDP, extension mode, browser channels, and custom executable paths are not supported with the Camoufox provider.
+
+Advanced Camoufox options live in config rather than dedicated CLI flags:
+
+```json
+{
+  "browser": {
+    "provider": "camoufox",
+    "camoufoxOptions": {
+      "headless": "virtual",
+      "humanize": true,
+      "geoip": true,
+      "block_webrtc": true
+    }
+  }
+}
+```
 
 ## Configuration
 

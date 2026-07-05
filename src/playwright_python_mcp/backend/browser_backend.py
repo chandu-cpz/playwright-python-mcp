@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib
 import json
 import os
 import sys
@@ -330,6 +331,9 @@ class BrowserBackend:
             )
             return self._browser
 
+        if self._config.browser_provider == "camoufox":
+            return await self._launch_camoufox(cwd)
+
         launch_options = dict(self._config.browser_launch_options)
         headless = bool(launch_options.get("headless", self._config.headless))
         if not headless and os.name == "posix" and not os.environ.get("DISPLAY"):
@@ -366,6 +370,62 @@ class BrowserBackend:
             return browser
         try:
             return await browser_type.launch(**launch_options)
+        except Exception as exc:
+            raise _map_browser_launch_error(exc, self._config, None, launch_options) from exc
+
+    async def _launch_camoufox(self, cwd: Path) -> Browser:
+        try:
+            camoufox_async_api = importlib.import_module("camoufox.async_api")
+        except ModuleNotFoundError as exc:
+            if exc.name and exc.name.startswith("camoufox"):
+                raise ValueError(
+                    '--browser camoufox requires the optional "camoufox" dependency group. '
+                    "Install playwright-python-mcp[camoufox] and run "
+                    "`playwright-python-mcp install-browser camoufox`."
+                ) from exc
+            raise
+        async_new_browser = camoufox_async_api.AsyncNewBrowser
+
+        launch_options = dict(self._config.browser_launch_options)
+        camoufox_options = dict(self._config.camoufox_options)
+        for unsupported in ("channel", "chromium_sandbox", "executable_path"):
+            launch_options.pop(unsupported, None)
+        headless = launch_options.pop("headless", self._config.headless)
+        camoufox_options.setdefault("headless", headless)
+        launch_options.setdefault("traces_dir", self._traces_dir(cwd))
+        launch_options["handle_sigint"] = False
+        launch_options["handle_sigterm"] = False
+
+        if self._config.browser_user_data_dir is not None and self._config.browser_isolated:
+            raise ValueError("Browser userDataDir is not supported in isolated mode.")
+        if not self._config.browser_isolated:
+            user_data_dir = self._config.browser_user_data_dir or await self._default_user_data_dir(cwd)
+            if await _is_profile_locked_5_times(user_data_dir):
+                raise ValueError(
+                    f"Browser is already in use for {user_data_dir}, "
+                    "use --isolated to run multiple instances of the same browser"
+                )
+            try:
+                self._playwright_context = await async_new_browser(
+                    self._playwright,
+                    persistent_context=True,
+                    user_data_dir=str(user_data_dir),
+                    **launch_options,
+                    **camoufox_options,
+                )
+            except Exception as exc:
+                raise _map_browser_launch_error(exc, self._config, user_data_dir, launch_options) from exc
+            browser = self._playwright_context.browser
+            if browser is None:
+                raise ValueError("Camoufox persistent context did not expose a browser instance.")
+            return browser
+        try:
+            return await async_new_browser(
+                self._playwright,
+                persistent_context=False,
+                **launch_options,
+                **camoufox_options,
+            )
         except Exception as exc:
             raise _map_browser_launch_error(exc, self._config, None, launch_options) from exc
 

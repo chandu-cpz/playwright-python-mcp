@@ -33,6 +33,9 @@ Repository = "https://github.com/chandu-cpz/playwright-python-mcp"
 Issues = "https://github.com/chandu-cpz/playwright-python-mcp/issues"
 
 [project.optional-dependencies]
+camoufox = [
+    "camoufox[geoip]>=0.4.11",
+]
 extension = [
     "websockets>=14.0",
 ]
