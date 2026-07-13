@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import Any, Literal
 
 from playwright_python_mcp.backend.context import Context, FilenameTemplate
@@ -45,11 +46,14 @@ async def _handle_video_chapter(context: Context, params: dict[str, Any], respon
 
 async def _handle_show_actions(context: Context, params: dict[str, Any], response: Response) -> None:
     tab = context.current_tab_or_die()
-    await tab.page.screencast.show_actions(
-        duration=params.get("duration"),
-        position=params.get("position"),
-        cursor=params.get("cursor"),
-    )
+    show_actions = tab.page.screencast.show_actions
+    options = {
+        "duration": params.get("duration"),
+        "position": params.get("position"),
+    }
+    if "cursor" in inspect.signature(show_actions).parameters:
+        options["cursor"] = params.get("cursor")
+    await show_actions(**options)
     response.add_text_result("Action annotations enabled.")
 
 

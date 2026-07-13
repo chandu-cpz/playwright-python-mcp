@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import importlib
+import inspect
 import json
 import os
 import sys
@@ -274,11 +275,17 @@ class BrowserBackend:
         cwd = cwd or Path.cwd()
         assert self._playwright is not None
         if self._config.cdp_endpoint:
+            connect_kwargs: dict[str, Any] = {
+                "headers": self._config.cdp_headers,
+                "timeout": self._config.cdp_timeout,
+            }
+            if "artifacts_dir" in inspect.signature(
+                self._playwright.chromium.connect_over_cdp
+            ).parameters:
+                connect_kwargs["artifacts_dir"] = self._traces_dir(cwd)
             self._browser = await self._playwright.chromium.connect_over_cdp(
                 self._config.cdp_endpoint,
-                headers=self._config.cdp_headers,
-                timeout=self._config.cdp_timeout,
-                artifacts_dir=self._traces_dir(cwd),
+                **connect_kwargs,
             )
             return self._browser
         if self._config.remote_endpoint:
@@ -393,7 +400,7 @@ class BrowserBackend:
                     "`playwright-python-mcp install-browser camoufox`."
                 ) from exc
             raise
-        async_new_browser = camoufox_async_api.AsyncNewBrowser
+        async_new_browser: Any = camoufox_async_api.AsyncNewBrowser
 
         launch_options = dict(self._config.browser_launch_options)
         camoufox_options = dict(self._config.camoufox_options)
