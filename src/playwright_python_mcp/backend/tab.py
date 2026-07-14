@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+import inspect
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -746,11 +747,14 @@ class Tab:
 
         async def capture() -> str:
             if root is not None:
-                return await root.aria_snapshot(mode="ai", depth=depth, boxes=boxes)
+                snapshot = root.aria_snapshot
+                return await snapshot(**_aria_snapshot_options(snapshot, depth=depth, boxes=boxes))
             if target is None:
-                return await self.page.aria_snapshot(mode="ai", depth=depth, boxes=boxes)
+                snapshot = self.page.aria_snapshot
+                return await snapshot(**_aria_snapshot_options(snapshot, depth=depth, boxes=boxes))
             locator = await self.snapshot_locator(target)
-            return await locator.aria_snapshot(mode="ai", depth=depth, boxes=boxes)
+            snapshot = locator.aria_snapshot
+            return await snapshot(**_aria_snapshot_options(snapshot, depth=depth, boxes=boxes))
 
         capture_task = self.context.track_task(asyncio.create_task(capture()))
         modal_task = self.context.track_task(asyncio.create_task(self._modal_event.wait()))
@@ -775,6 +779,18 @@ class Tab:
 
 
 _CONSOLE_MESSAGE_LEVELS = ["error", "warning", "info", "debug"]
+
+
+def _aria_snapshot_options(
+    snapshot: Any,
+    *,
+    depth: int | None,
+    boxes: bool | None,
+) -> dict[str, Any]:
+    options: dict[str, Any] = {"mode": "ai", "depth": depth}
+    if "boxes" in inspect.signature(snapshot).parameters:
+        options["boxes"] = boxes
+    return options
 
 
 def _console_level_for_message_type(message_type: str) -> str:

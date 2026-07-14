@@ -10,6 +10,7 @@ from collections.abc import Callable
 from playwright_python_mcp.backend.browser_backend import BrowserBackend
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
+from playwright_python_mcp.backend.tab import _aria_snapshot_options
 from playwright_python_mcp.backend.tool import Tool
 from playwright_python_mcp.backend.tools.common import common_tools
 from playwright_python_mcp.mcp.config import load_config
@@ -25,6 +26,27 @@ def _config(**options: Any):
         vision=False,
         **options,
     )
+
+
+def test_aria_snapshot_options_omit_unsupported_boxes() -> None:
+    async def snapshot(*, mode: str, depth: int | None) -> str:
+        return f"{mode}:{depth}"
+
+    assert _aria_snapshot_options(snapshot, depth=4, boxes=True) == {
+        "mode": "ai",
+        "depth": 4,
+    }
+
+
+def test_aria_snapshot_options_preserve_supported_boxes() -> None:
+    async def snapshot(*, mode: str, depth: int | None, boxes: bool | None) -> str:
+        return f"{mode}:{depth}:{boxes}"
+
+    assert _aria_snapshot_options(snapshot, depth=4, boxes=True) == {
+        "mode": "ai",
+        "depth": 4,
+        "boxes": True,
+    }
 
 
 def test_default_launch_uses_persistent_context(monkeypatch, tmp_path: Path) -> None:
