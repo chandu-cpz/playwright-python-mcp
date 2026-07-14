@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any, cast
 from collections.abc import Callable
 
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
 from playwright_python_mcp.backend.browser_backend import BrowserBackend
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
@@ -55,6 +57,7 @@ def test_navigation_releases_after_commit_and_only_briefly_waits_for_dom() -> No
         def __init__(self) -> None:
             self.goto_options: dict[str, Any] = {}
             self.load_options: tuple[str, int] | None = None
+            self.url = "about:blank"
 
         def on(self, _event: str, _listener: Any) -> None:
             pass
@@ -82,8 +85,41 @@ def test_navigation_releases_after_commit_and_only_briefly_waits_for_dom() -> No
     async def run() -> None:
         tab = NavigationTab()
         await Tab.navigate(cast(Any, tab), "https://example.com")
-        assert tab.page.goto_options == {"wait_until": "commit", "timeout": 60_000}
+        assert tab.page.goto_options == {"wait_until": "commit", "timeout": 10_000}
         assert tab.page.load_options == ("domcontentloaded", 5000)
+
+    asyncio.run(run())
+
+
+def test_navigation_accepts_requested_url_when_commit_event_is_missing() -> None:
+    class NavigationPage:
+        url = "https://example.com/jobs?id=42"
+
+        def on(self, _event: str, _listener: Any) -> None:
+            pass
+
+        def remove_listener(self, _event: str, _listener: Any) -> None:
+            pass
+
+        async def goto(self, _url: str, **_options: Any) -> None:
+            raise PlaywrightTimeoutError("commit event was not emitted")
+
+        async def wait_for_load_state(self, _state: str, *, timeout: int) -> None:
+            assert timeout == 5000
+
+    class NavigationTab:
+        def __init__(self) -> None:
+            loop = asyncio.get_running_loop()
+            self._initialized = loop.create_future()
+            self._initialized.set_result(None)
+            self.page = NavigationPage()
+            self.navigation_timeout = 60_000
+
+        def _clear_collected_artifacts(self) -> None:
+            pass
+
+    async def run() -> None:
+        await Tab.navigate(cast(Any, NavigationTab()), "https://example.com/jobs?id=42")
 
     asyncio.run(run())
 

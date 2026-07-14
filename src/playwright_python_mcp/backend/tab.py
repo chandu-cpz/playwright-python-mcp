@@ -19,6 +19,7 @@ from playwright.async_api import (
     Page,
     Request,
     Response as PlaywrightResponse,
+    TimeoutError as PlaywrightTimeoutError,
 )
 
 from .locator_generator import as_python_locator
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
 Button = Literal["left", "middle", "right"]
 Modifier = Literal["Alt", "Control", "ControlOrMeta", "Meta", "Shift"]
 _REF_PATTERN = re.compile(r"^(?:f\d+)?e\d+$")
+_COMMIT_ACK_TIMEOUT_MS = 10_000
 
 
 @dataclass(slots=True)
@@ -167,7 +169,14 @@ class Tab:
 
         self.page.on("download", download_listener)
         try:
-            await self.page.goto(url, wait_until="commit", timeout=self.navigation_timeout)
+            await self.page.goto(
+                url,
+                wait_until="commit",
+                timeout=min(self.navigation_timeout, _COMMIT_ACK_TIMEOUT_MS),
+            )
+        except PlaywrightTimeoutError:
+            if not _same_navigation_target(self.page.url, url):
+                raise
         except Error as exc:
             if not _might_be_download_error(exc):
                 raise
@@ -183,7 +192,6 @@ class Tab:
             await self.page.wait_for_load_state("domcontentloaded", timeout=5000)
         except Error:
             pass
-
     async def check_url_and_navigate(self, url: str) -> str:
         try:
             parsed = urlparse(url)
@@ -791,6 +799,25 @@ def _aria_snapshot_options(
     if "boxes" in inspect.signature(snapshot).parameters:
         options["boxes"] = boxes
     return options
+
+
+def _same_navigation_target(actual: str, requested: str) -> bool:
+    """Confirm that a timed-out protocol navigation reached its requested URL."""
+    actual_url = urlparse(actual)
+    requested_url = urlparse(requested)
+    return (
+        actual_url.scheme.lower(),
+        actual_url.netloc.lower(),
+        actual_url.path or "/",
+        actual_url.params,
+        actual_url.query,
+    ) == (
+        requested_url.scheme.lower(),
+        requested_url.netloc.lower(),
+        requested_url.path or "/",
+        requested_url.params,
+        requested_url.query,
+    )
 
 
 def _console_level_for_message_type(message_type: str) -> str:
