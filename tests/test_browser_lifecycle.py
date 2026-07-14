@@ -11,6 +11,7 @@ from playwright_python_mcp.backend.browser_backend import BrowserBackend
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
 from playwright_python_mcp.backend.tab import _aria_snapshot_options
+from playwright_python_mcp.backend.tab import Tab
 from playwright_python_mcp.backend.tool import Tool
 from playwright_python_mcp.backend.tools.common import common_tools
 from playwright_python_mcp.mcp.config import load_config
@@ -47,6 +48,44 @@ def test_aria_snapshot_options_preserve_supported_boxes() -> None:
         "depth": 4,
         "boxes": True,
     }
+
+
+def test_navigation_releases_after_commit_and_only_briefly_waits_for_dom() -> None:
+    class NavigationPage:
+        def __init__(self) -> None:
+            self.goto_options: dict[str, Any] = {}
+            self.load_options: tuple[str, int] | None = None
+
+        def on(self, _event: str, _listener: Any) -> None:
+            pass
+
+        def remove_listener(self, _event: str, _listener: Any) -> None:
+            pass
+
+        async def goto(self, _url: str, **options: Any) -> None:
+            self.goto_options = options
+
+        async def wait_for_load_state(self, state: str, *, timeout: int) -> None:
+            self.load_options = (state, timeout)
+
+    class NavigationTab:
+        def __init__(self) -> None:
+            loop = asyncio.get_running_loop()
+            self._initialized = loop.create_future()
+            self._initialized.set_result(None)
+            self.page = NavigationPage()
+            self.navigation_timeout = 60_000
+
+        def _clear_collected_artifacts(self) -> None:
+            pass
+
+    async def run() -> None:
+        tab = NavigationTab()
+        await Tab.navigate(cast(Any, tab), "https://example.com")
+        assert tab.page.goto_options == {"wait_until": "commit", "timeout": 60_000}
+        assert tab.page.load_options == ("domcontentloaded", 5000)
+
+    asyncio.run(run())
 
 
 def test_default_launch_uses_persistent_context(monkeypatch, tmp_path: Path) -> None:

@@ -167,7 +167,7 @@ class Tab:
 
         self.page.on("download", download_listener)
         try:
-            await self.page.goto(url, wait_until="domcontentloaded", timeout=self.navigation_timeout)
+            await self.page.goto(url, wait_until="commit", timeout=self.navigation_timeout)
         except Error as exc:
             if not _might_be_download_error(exc):
                 raise
@@ -180,7 +180,7 @@ class Tab:
         finally:
             self.page.remove_listener("download", download_listener)
         try:
-            await self.page.wait_for_load_state("load", timeout=5000)
+            await self.page.wait_for_load_state("domcontentloaded", timeout=5000)
         except Error:
             pass
 
