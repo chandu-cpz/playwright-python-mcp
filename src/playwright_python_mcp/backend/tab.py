@@ -35,10 +35,10 @@ Button = Literal["left", "middle", "right"]
 Modifier = Literal["Alt", "Control", "ControlOrMeta", "Meta", "Shift"]
 _REF_PATTERN = re.compile(r"^(?:f\d+)?e\d+$")
 # A fresh Camoufox profile can need extra time to settle its network/geolocation
-# state before the first document commit.  Keep this shorter than the configured
-# navigation timeout, but long enough not to turn that startup work into a false
-# navigation failure.
-_COMMIT_ACK_TIMEOUT_MS = 30_000
+# state before the first document commit. Keep this bounded by the configured
+# navigation timeout, but allow the default 60-second navigation budget before
+# turning that startup work into a false navigation failure.
+_COMMIT_ACK_TIMEOUT_MS = 60_000
 
 
 @dataclass(slots=True)
@@ -173,10 +173,13 @@ class Tab:
 
         self.page.on("download", download_listener)
         try:
+            commit_timeout = self.navigation_timeout
+            if commit_timeout is not None:
+                commit_timeout = min(commit_timeout, _COMMIT_ACK_TIMEOUT_MS)
             await self.page.goto(
                 url,
                 wait_until="commit",
-                timeout=min(self.navigation_timeout, _COMMIT_ACK_TIMEOUT_MS),
+                timeout=commit_timeout,
             )
         except PlaywrightTimeoutError:
             if not _same_navigation_target(self.page.url, url):
