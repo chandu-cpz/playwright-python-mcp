@@ -17,6 +17,8 @@ from playwright.async_api import BrowserContext, Page
 from playwright_python_mcp.mcp.config import ServerConfig
 from .codegen import python_literal
 
+_BRING_TO_FRONT_TIMEOUT_SECONDS = 5.0
+
 if TYPE_CHECKING:
     from .session_log import SessionLog
     from .tab import Tab
@@ -182,7 +184,13 @@ class Context:
         if index < 0 or index >= len(self._tabs):
             raise ValueError(f"Tab index {index} is out of range")
         self._current_tab = self._tabs[index]
-        await self._current_tab.page.bring_to_front()
+        try:
+            async with asyncio.timeout(_BRING_TO_FRONT_TIMEOUT_SECONDS):
+                await self._current_tab.page.bring_to_front()
+        except TimeoutError:
+            # Selecting the backend tab is authoritative for tool routing. A window
+            # manager that cannot acknowledge foregrounding must not deadlock tools.
+            pass
 
     async def set_offline(self, offline: bool) -> None:
         await self._browser_context.set_offline(offline)

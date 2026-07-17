@@ -11,6 +11,7 @@ import pytest
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from playwright_python_mcp.backend.browser_backend import BrowserBackend
+from playwright_python_mcp.backend import context as context_module
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
 from playwright_python_mcp.backend.tab import _aria_snapshot_options
@@ -355,6 +356,28 @@ def test_context_new_tab_uses_page_event_without_double_registering() -> None:
 
         assert context.tabs() == [tab]
         assert context.current_tab() is tab
+
+    asyncio.run(run())
+
+
+def test_context_select_tab_survives_unacknowledged_foregrounding(monkeypatch: Any) -> None:
+    class HangingPage(FakePage):
+        async def bring_to_front(self) -> None:
+            await asyncio.Event().wait()
+
+    async def run() -> None:
+        first_page = FakePage("first")
+        hanging_page = HangingPage("hanging")
+        browser_context = FakeBrowserContext([first_page, hanging_page])
+        context = Context(cast(Any, browser_context), _config())
+        await context.initialize()
+        monkeypatch.setattr(context_module, "_BRING_TO_FRONT_TIMEOUT_SECONDS", 0.01)
+
+        await context.select_tab(1)
+
+        current_tab = context.current_tab()
+        assert current_tab is not None
+        assert current_tab.page is hanging_page
 
     asyncio.run(run())
 
