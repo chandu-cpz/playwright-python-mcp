@@ -176,6 +176,8 @@ class Tab:
             )
         except PlaywrightTimeoutError:
             if not _same_navigation_target(self.page.url, url):
+                with suppress(Error):
+                    await self.page.evaluate("window.stop()")
                 raise
         except Error as exc:
             if not _might_be_download_error(exc):

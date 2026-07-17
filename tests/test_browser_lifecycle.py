@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 from collections.abc import Callable
 
+import pytest
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from playwright_python_mcp.backend.browser_backend import BrowserBackend
@@ -120,6 +121,45 @@ def test_navigation_accepts_requested_url_when_commit_event_is_missing() -> None
 
     async def run() -> None:
         await Tab.navigate(cast(Any, NavigationTab()), "https://example.com/jobs?id=42")
+
+    asyncio.run(run())
+
+
+def test_navigation_stops_uncommitted_load_before_reraising_timeout() -> None:
+    class NavigationPage:
+        url = "about:blank"
+
+        def __init__(self) -> None:
+            self.evaluated: list[str] = []
+
+        def on(self, _event: str, _listener: Any) -> None:
+            pass
+
+        def remove_listener(self, _event: str, _listener: Any) -> None:
+            pass
+
+        async def goto(self, _url: str, **_options: Any) -> None:
+            raise PlaywrightTimeoutError("commit event was not emitted")
+
+        async def evaluate(self, expression: str) -> None:
+            self.evaluated.append(expression)
+
+    class NavigationTab:
+        def __init__(self) -> None:
+            loop = asyncio.get_running_loop()
+            self._initialized = loop.create_future()
+            self._initialized.set_result(None)
+            self.page = NavigationPage()
+            self.navigation_timeout = 60_000
+
+        def _clear_collected_artifacts(self) -> None:
+            pass
+
+    async def run() -> None:
+        tab = NavigationTab()
+        with pytest.raises(PlaywrightTimeoutError):
+            await Tab.navigate(cast(Any, tab), "https://example.com")
+        assert tab.page.evaluated == ["window.stop()"]
 
     asyncio.run(run())
 
