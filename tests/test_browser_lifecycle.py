@@ -86,7 +86,7 @@ def test_navigation_releases_after_commit_and_only_briefly_waits_for_dom() -> No
     async def run() -> None:
         tab = NavigationTab()
         await Tab.navigate(cast(Any, tab), "https://example.com")
-        assert tab.page.goto_options == {"wait_until": "commit", "timeout": 10_000}
+        assert tab.page.goto_options == {"wait_until": "commit", "timeout": 30_000}
         assert tab.page.load_options == ("domcontentloaded", 5000)
 
     asyncio.run(run())

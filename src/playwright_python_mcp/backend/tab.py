@@ -34,7 +34,11 @@ if TYPE_CHECKING:
 Button = Literal["left", "middle", "right"]
 Modifier = Literal["Alt", "Control", "ControlOrMeta", "Meta", "Shift"]
 _REF_PATTERN = re.compile(r"^(?:f\d+)?e\d+$")
-_COMMIT_ACK_TIMEOUT_MS = 10_000
+# A fresh Camoufox profile can need extra time to settle its network/geolocation
+# state before the first document commit.  Keep this shorter than the configured
+# navigation timeout, but long enough not to turn that startup work into a false
+# navigation failure.
+_COMMIT_ACK_TIMEOUT_MS = 30_000
 
 
 @dataclass(slots=True)
