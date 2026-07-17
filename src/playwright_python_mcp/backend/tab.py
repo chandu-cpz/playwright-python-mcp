@@ -38,7 +38,7 @@ _REF_PATTERN = re.compile(r"^(?:f\d+)?e\d+$")
 # state before the first document commit. Keep this bounded by the configured
 # navigation timeout, but allow the default 60-second navigation budget before
 # turning that startup work into a false navigation failure.
-_COMMIT_ACK_TIMEOUT_MS = 60_000
+_COMMIT_ACK_TIMEOUT_MS = 120_000
 
 
 @dataclass(slots=True)

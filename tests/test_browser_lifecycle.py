@@ -93,6 +93,44 @@ def test_navigation_releases_after_commit_and_only_briefly_waits_for_dom() -> No
     asyncio.run(run())
 
 
+def test_navigation_allows_slow_profiles_up_to_two_minutes() -> None:
+    class NavigationPage:
+        url = "about:blank"
+
+        def __init__(self) -> None:
+            self.goto_options: dict[str, Any] = {}
+
+        def on(self, _event: str, _listener: Any) -> None:
+            pass
+
+        def remove_listener(self, _event: str, _listener: Any) -> None:
+            pass
+
+        async def goto(self, _url: str, **options: Any) -> None:
+            self.goto_options = options
+
+        async def wait_for_load_state(self, _state: str, *, timeout: int) -> None:
+            assert timeout == 5000
+
+    class NavigationTab:
+        def __init__(self) -> None:
+            loop = asyncio.get_running_loop()
+            self._initialized = loop.create_future()
+            self._initialized.set_result(None)
+            self.page = NavigationPage()
+            self.navigation_timeout = 180_000
+
+        def _clear_collected_artifacts(self) -> None:
+            pass
+
+    async def run() -> None:
+        tab = NavigationTab()
+        await Tab.navigate(cast(Any, tab), "https://example.com")
+        assert tab.page.goto_options == {"wait_until": "commit", "timeout": 120_000}
+
+    asyncio.run(run())
+
+
 def test_navigation_accepts_requested_url_when_commit_event_is_missing() -> None:
     class NavigationPage:
         url = "https://example.com/jobs?id=42"
