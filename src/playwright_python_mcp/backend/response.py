@@ -173,7 +173,15 @@ class Response:
                 if len(tab_headers) != 1:
                     sections.append(("Open tabs", render_tabs_markdown(tab_headers), None, False))
                 current_header = next((header for header in tab_headers if header.current), tab_headers[0])
-                sections.append(("Page", render_tab_markdown(current_header), None, False))
+                page_lines = render_tab_markdown(current_header)
+                if (
+                    tab_snapshot is not None
+                    and self._snapshot_request is not None
+                    and self._snapshot_request.mode != "none"
+                    and tab_snapshot.aria_snapshot
+                ):
+                    page_lines.append(f"- Snapshot version: {tab_snapshot.version}")
+                sections.append(("Page", page_lines, None, False))
 
         if tab_snapshot is not None and tab_snapshot.modal_states:
             sections.append(("Modal state", render_modal_states(tab_snapshot.modal_states), None, False))
