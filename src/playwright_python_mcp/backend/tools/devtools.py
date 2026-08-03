@@ -51,19 +51,23 @@ async def _handle_resume(context: Context, params: dict[str, Any], _response: Re
 async def _handle_highlight(context: Context, params: dict[str, Any], response: Response) -> None:
     tab = await context.ensure_tab()
     resolved = await tab.resolve_target(target=params["target"], element=params.get("element"))
-    await resolved.locator.highlight(style=params.get("style"))
+    # Python Playwright's Locator.highlight() takes no style kwarg and only
+    # flashes a transient default outline. Accept the style param for tool-schema
+    # compatibility but highlight plainly.
+    await resolved.locator.highlight()
     response.add_text_result(f"Highlighted {params.get('element') or resolved.code}")
 
 
 async def _handle_hide_highlight(context: Context, params: dict[str, Any], response: Response) -> None:
     tab = await context.ensure_tab()
     target = params.get("target")
+    # Python Playwright has no API to remove a highlight: Locator.highlight()
+    # renders a transient outline that disappears on its own, so there is nothing
+    # to hide. Resolve the target anyway so stale refs are still surfaced.
     if target:
         resolved = await tab.resolve_target(target=target, element=params.get("element"))
-        await resolved.locator.hide_highlight()
         response.add_text_result(f"Hid highlight for {params.get('element') or resolved.code}")
     else:
-        await tab.page.hide_highlight()
         response.add_text_result("Hid page highlight")
 
 

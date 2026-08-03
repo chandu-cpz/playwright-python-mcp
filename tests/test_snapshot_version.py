@@ -108,19 +108,57 @@ def test_ref_from_current_version_resolves() -> None:
     asyncio.run(run())
 
 
-def test_stale_ref_is_rejected_before_any_lookup() -> None:
+class MissingLocator:
+    async def normalize(self) -> "FakeNormalized":
+        raise Exception("element not found")
+
+    def describe(self, element: str) -> "MissingLocator":
+        return self
+
+
+class MissingRefPage:
+    def __init__(self) -> None:
+        self.lookup_selectors: list[str] = []
+
+    def locator(self, selector: str) -> MissingLocator:
+        self.lookup_selectors.append(selector)
+        return MissingLocator()
+
+
+def test_stale_versioned_ref_still_resolves_live() -> None:
     async def run() -> None:
         page = FakeRefPage()
         tab = _bare_tab(_snapshot_version=7, page=page)
 
-        with pytest.raises(StaleSnapshotError) as excinfo:
-            await Tab.resolve_target(tab, target="e1v5")
+        resolved = await Tab.resolve_target(tab, target="e1v5")
 
+        assert isinstance(resolved, ResolvedTarget)
+        assert page.lookup_selectors == ["aria-ref=e1"]
+
+    asyncio.run(run())
+
+
+def test_absent_ref_errors_by_ref_kind() -> None:
+    async def run() -> None:
+        page = MissingRefPage()
+        tab = _bare_tab(_snapshot_version=7, page=page)
+
+        with pytest.raises(StaleSnapshotError) as excinfo:
+            await Tab.resolve_target(tab, target="e9v5")
         assert excinfo.value.args[0] == (
-            "STALE_SNAPSHOT: element reference e1v5 is from snapshot version "
+            "STALE_SNAPSHOT: element reference e9v5 is from snapshot version "
             "5 but current version is 7; take a fresh snapshot before acting on this element"
         )
-        assert page.lookup_selectors == []
+        assert page.lookup_selectors == ["aria-ref=e9"]
+
+        page.lookup_selectors.clear()
+
+        with pytest.raises(ValueError) as excinfo2:
+            await Tab.resolve_target(tab, target="e9")
+        assert excinfo2.value.args[0] == (
+            "Ref e9 not found in the current page snapshot. Try capturing new snapshot."
+        )
+        assert page.lookup_selectors == ["aria-ref=e9"]
 
     asyncio.run(run())
 

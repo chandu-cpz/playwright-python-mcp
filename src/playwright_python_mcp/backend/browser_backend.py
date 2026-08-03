@@ -292,18 +292,18 @@ class BrowserBackend:
             remote = self._config.remote_endpoint
             if isinstance(remote, str):
                 connect_endpoint = remote
-                connect_kwargs: dict[str, Any] = {}
+                remote_connect_kwargs: dict[str, Any] = {}
                 if self._config.remote_headers:
-                    connect_kwargs["headers"] = self._config.remote_headers
+                    remote_connect_kwargs["headers"] = self._config.remote_headers
             else:
-                connect_kwargs = dict(remote)
-                connect_endpoint = connect_kwargs.pop("endpoint", "")
+                remote_connect_kwargs = dict(remote)
+                connect_endpoint = remote_connect_kwargs.pop("endpoint", "")
                 if self._config.remote_headers:
-                    headers = connect_kwargs.pop("headers", None)
+                    headers = remote_connect_kwargs.pop("headers", None)
                     merged = dict(self._config.remote_headers)
                     if isinstance(headers, dict):
                         merged.update(headers)
-                    connect_kwargs["headers"] = merged
+                    remote_connect_kwargs["headers"] = merged
             descriptor = await _server_registry_find(connect_endpoint)
             if descriptor is not None:
                 browser = descriptor.get("browser") or {}
@@ -313,7 +313,7 @@ class BrowserBackend:
                 self._browser = await browser_type.connect(endpoint)
             else:
                 browser_type = getattr(self._playwright, self._config.browser_name)
-                self._browser = await browser_type.connect(connect_endpoint, **connect_kwargs)
+                self._browser = await browser_type.connect(connect_endpoint, **remote_connect_kwargs)
             # A browser started via `launchServer` has no contexts; create one.
             if not self._browser.contexts:
                 await self._browser.new_context(**self._config.browser_context_options)

@@ -528,10 +528,6 @@ class Tab:
             )
 
         token, version = _split_ref(target)
-        if version is not None and version != self._snapshot_version:
-            raise StaleSnapshotError(
-                _stale_snapshot_message(target, version, self._snapshot_version)
-            )
         try:
             locator = self.page.locator(f"aria-ref={token}")
             if element:
@@ -544,6 +540,10 @@ class Tab:
                 code=as_python_locator(normalized._impl_obj._selector),
             )
         except Exception as exc:
+            if version is not None and version != self._snapshot_version:
+                raise StaleSnapshotError(
+                    _stale_snapshot_message(target, version, self._snapshot_version)
+                ) from exc
             raise ValueError(
                 f"Ref {target} not found in the current page snapshot. Try capturing new snapshot."
             ) from exc
@@ -632,11 +632,18 @@ class Tab:
 
     def _console_entry_from_message(self, message: ConsoleMessage) -> ConsoleEntry:
         location = message.location
+        line_number = location.get("lineNumber")
+        fallback_line: int | None = None
+        if not line_number:
+            # Some console message sources report the line under a non-typed
+            # "line" key; keep the fallback but only accept an int.
+            fallback = location.get("line")
+            fallback_line = fallback if isinstance(fallback, int) else None
         return ConsoleEntry(
             type=message.type,
             text=message.text,
             location_url=location.get("url") or None,
-            location_line=location.get("lineNumber") or location.get("line"),
+            location_line=line_number or fallback_line,
             navigation_index=self._navigation_index,
         )
 
