@@ -580,6 +580,27 @@ class Tab:
     def clear_modal_state(self, modal_state: dict[str, Any]) -> None:
         self._modal_states = [state for state in self._modal_states if state is not modal_state]
 
+    async def prune_stale_dialogs(self) -> None:
+        """Drop recorded dialog modal states whose native dialog is already closed.
+
+        A recorded dialog can be dismissed by the human directly in the
+        visible browser instead of through browser_handle_dialog. Playwright
+        never notifies us in that case, so without a liveness probe the stale
+        state would block every tool forever. While a native dialog is still
+        open the page's JavaScript is suspended, so a short evaluate probe
+        completes only when the dialog is gone.
+        """
+        if not any(state.get("type") == "dialog" for state in self._modal_states):
+            return
+        try:
+            await asyncio.wait_for(self.page.evaluate("1 + 1"), timeout=0.5)
+        except Exception:
+            return
+        self._modal_states = [
+            state for state in self._modal_states if state.get("type") != "dialog"
+        ]
+        self._modal_event = asyncio.Event()
+
     def clear_requests(self) -> None:
         self._requests.clear()
 

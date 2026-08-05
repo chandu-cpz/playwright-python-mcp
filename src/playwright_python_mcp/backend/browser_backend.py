@@ -102,13 +102,19 @@ class BrowserBackend:
                 json_mode=bool(meta and meta.get("json")),
             )
             context.set_running_tool(name)
+            tab = context.current_tab()
+            if tab is not None:
+                await tab.prune_stale_dialogs()
             if _blocks_on_modal_state(context, tool):
                 if tool.clears_modal_state:
                     response.add_error(
                         f'Error: The tool "{name}" can only be used when there is related modal state present.'
                     )
                 else:
-                    response.add_error(f'Error: Tool "{name}" does not handle the modal state.')
+                    response.add_error(
+                        f'Error: Tool "{name}" does not handle the modal state. '
+                        f'Use {_modal_clearing_hint(context)} to clear it first.'
+                    )
                 result = await response.serialize()
                 if self._disconnected:
                     result = _attach_close_marker(result)
@@ -492,6 +498,20 @@ def _blocks_on_modal_state(context: Context, tool: Tool) -> bool:
     if tool.clears_modal_state is not None:
         return not any(state.get("type") == tool.clears_modal_state for state in modal_states)
     return True
+
+
+def _modal_clearing_hint(context: Context) -> str:
+    tab = context.current_tab()
+    if tab is None:
+        return "browser_handle_dialog"
+    tools = sorted(
+        {
+            str(state.get("clearedBy", {}).get("tool"))
+            for state in tab.modal_states()
+            if state.get("clearedBy")
+        }
+    )
+    return ", ".join(tools) if tools else "browser_handle_dialog"
 
 
 def _drain_unhandled_errors(context: Context, response: Response) -> None:
