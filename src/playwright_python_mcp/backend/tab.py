@@ -33,20 +33,13 @@ if TYPE_CHECKING:
 
 Button = Literal["left", "middle", "right"]
 Modifier = Literal["Alt", "Control", "ControlOrMeta", "Meta", "Shift"]
-_REF_PATTERN = re.compile(r"^(?:f\d+)?e\d+(?:v\d+)?$")
-_REF_TOKEN_PATTERN = re.compile(r"^(?P<token>(?:f\d+)?e\d+)(?:v(?P<version>\d+))?$")
-_REF_INLINE_PATTERN = re.compile(r"\[ref=((?:f\d+)?e\d+)\]")
-# Snapshot refs carry the snapshot epoch as a trailing "v<int>" suffix, e.g. e123v7.
-_REF_VERSION_SEPARATOR = "v"
+_REF_PATTERN = re.compile(r"^(?:f\d+)?e\d+$")
 # A fresh Camoufox profile can need extra time to settle its network/geolocation
 # state before the first document commit. Keep this bounded by the configured
 # navigation timeout, but allow the default 60-second navigation budget before
 # turning that startup work into a false navigation failure.
 _COMMIT_ACK_TIMEOUT_MS = 120_000
 
-
-class StaleSnapshotError(ValueError):
-    """Raised when a target ref belongs to a snapshot older than the current one."""
 
 
 @dataclass(slots=True)
@@ -102,7 +95,6 @@ class TabSnapshot:
     modal_states: list[dict[str, Any]] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)
     console_link: str | None = None
-    version: int = 0
 
 
 class Tab:
@@ -130,7 +122,6 @@ class Tab:
         self._modal_event = asyncio.Event()
         self._main_document_status: DocumentStatus | None = None
         self._navigation_index = 0
-        self._snapshot_version = 0
         self._console_log = LogFile(context, file_prefix="console", title="Console")
         self._listeners: list[tuple[Any, str, Any]] = []
         self._initialized = context.track_task(asyncio.create_task(self._initialize()))
@@ -441,10 +432,6 @@ class Tab:
     ) -> str:
         return (await self.capture_tab_snapshot(target=target, depth=depth, boxes=boxes)).aria_snapshot
 
-    @property
-    def snapshot_version(self) -> int:
-        return self._snapshot_version
-
     async def capture_tab_snapshot(
         self,
         *,
@@ -462,7 +449,6 @@ class Tab:
                 modal_states=list(self._modal_states),
                 events=[],
                 console_link=None,
-                version=self._snapshot_version,
             )
         aria_snapshot = ""
         if include_aria:
@@ -473,14 +459,12 @@ class Tab:
                     modal_states=list(self._modal_states),
                     events=[],
                     console_link=None,
-                    version=self._snapshot_version,
                 )
         snapshot = TabSnapshot(
             aria_snapshot=aria_snapshot,
             modal_states=list(self._modal_states),
             events=self._recent_event_entries,
             console_link=await self._console_log.take(relative_to=relative_to),
-            version=self._snapshot_version,
         )
         self._recent_event_entries = []
         return snapshot
@@ -527,9 +511,8 @@ class Tab:
                 code=as_python_locator(selector),
             )
 
-        token, version = _split_ref(target)
         try:
-            locator = self.page.locator(f"aria-ref={token}")
+            locator = self.page.locator(f"aria-ref={target}")
             if element:
                 locator = locator.describe(element)
             normalized = await locator.normalize()
@@ -540,10 +523,6 @@ class Tab:
                 code=as_python_locator(normalized._impl_obj._selector),
             )
         except Exception as exc:
-            if version is not None and version != self._snapshot_version:
-                raise StaleSnapshotError(
-                    _stale_snapshot_message(target, version, self._snapshot_version)
-                ) from exc
             raise ValueError(
                 f"Ref {target} not found in the current page snapshot. Try capturing new snapshot."
             ) from exc
@@ -833,8 +812,7 @@ class Tab:
         snapshot = await capture_task
         if not snapshot:
             return ""
-        self._snapshot_version += 1
-        return _version_refs(snapshot, self._snapshot_version)
+        return snapshot
 
     async def wait_for_timeout(self, seconds: float) -> None:
         if any(state.get("type") == "dialog" for state in self._modal_states):
@@ -862,33 +840,6 @@ def _aria_snapshot_options(
     if "boxes" in inspect.signature(snapshot).parameters:
         options["boxes"] = boxes
     return options
-
-
-def _split_ref(ref: str) -> tuple[str, int | None]:
-    """Split a (possibly versioned) ref into its base token and optional snapshot version."""
-    match = _REF_TOKEN_PATTERN.match(ref)
-    if match is None:
-        return ref, None
-    version = match.group("version")
-    return match.group("token"), int(version) if version is not None else None
-
-
-def _version_refs(snapshot: str, version: int) -> str:
-    """Stamp every element ref in an aria snapshot with the snapshot version."""
-    suffix = f"{_REF_VERSION_SEPARATOR}{version}"
-
-    def stamp(match: re.Match[str]) -> str:
-        return f"[ref={match.group(1)}{suffix}]"
-
-    return _REF_INLINE_PATTERN.sub(stamp, snapshot)
-
-
-def _stale_snapshot_message(ref: str, old_version: int, current_version: int) -> str:
-    return (
-        f"STALE_SNAPSHOT: element reference {ref} is from snapshot version "
-        f"{old_version} but current version is {current_version}; "
-        f"take a fresh snapshot before acting on this element"
-    )
 
 
 def _same_navigation_target(actual: str, requested: str) -> bool:

@@ -3,8 +3,14 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from playwright_python_mcp.backend.tab import Tab
 
-from tests.test_snapshot_version import _bare_tab
+
+def _bare_tab(**attrs: Any) -> Tab:
+    tab = object.__new__(Tab)
+    for name, value in attrs.items():
+        setattr(tab, name, value)
+    return tab
 
 
 class FakeProbePage:

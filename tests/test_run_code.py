@@ -19,14 +19,10 @@ def test_run_code_supports_async_function() -> None:
     assert result == "ok"
 
 
-def test_run_code_blocks_import_by_default() -> None:
-    with pytest.raises(ImportError, match="__import__"):
-        asyncio.run(_execute_python_code("import os", object()))
+def test_run_code_allows_normal_builtins() -> None:
+    result = asyncio.run(_execute_python_code('import os; return os.sep', object()))
 
-
-def test_run_code_blocks_open_by_default() -> None:
-    with pytest.raises(NameError, match="open"):
-        asyncio.run(_execute_python_code('open("/tmp/blocked", "w")', object()))
+    assert result == "/"
 
 
 def test_run_code_async_failure_is_reported() -> None:

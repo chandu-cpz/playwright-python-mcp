@@ -6,6 +6,8 @@ import re
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
+
 from playwright_python_mcp.backend.context import Context
 from playwright_python_mcp.backend.response import Response
 from playwright_python_mcp.backend.session_log import SessionLog
@@ -13,6 +15,13 @@ from playwright_python_mcp.backend.tab import TabHeader, TabSnapshot
 from playwright_python_mcp.backend.tools import IMPLEMENTED_TOOLS, filtered_tools
 from playwright_python_mcp.mcp.config import load_config
 from playwright_python_mcp.mcp.server import create_server
+
+
+def _result_text(result: Any) -> str:
+    content = result.content
+    if isinstance(content, str):
+        return content
+    return "\n".join(block.text for block in content)
 
 
 def _config():
@@ -66,6 +75,9 @@ def test_fastmcp_registration_is_non_threaded_and_has_metadata() -> None:
 
 
 def test_implemented_tool_metadata_matches_upstream_backend_definitions() -> None:
+    upstream_dir = Path("upstream/playwright/packages/playwright-core/src/tools/backend")
+    if not upstream_dir.is_dir():
+        pytest.skip("upstream playwright backend fixture is not checked out")
     upstream_metadata = _parse_upstream_tool_metadata()
     tools = {tool.name: tool for tool in IMPLEMENTED_TOOLS}
 
@@ -233,6 +245,7 @@ def test_response_does_not_capture_aria_snapshot_without_request(tmp_path) -> No
 
         assert tab.capture_kwargs == {
             "target": None,
+            "root": None,
             "depth": None,
             "boxes": None,
             "relative_to": tmp_path,
@@ -251,9 +264,8 @@ def test_explicit_snapshot_is_inline_by_default(tmp_path: Path) -> None:
         )
         response.set_include_full_snapshot()
 
-        result = await response.serialize()
+        result = _result_text(await response.serialize())
 
-        assert isinstance(result, str)
         assert "```yaml" in result
         assert '- button "Submit" [ref=e1]' in result
         assert "[Snapshot](" not in result
@@ -271,9 +283,8 @@ def test_action_snapshot_uses_file_for_full_mode(tmp_path: Path) -> None:
         )
         response.set_include_snapshot()
 
-        result = await response.serialize()
+        result = _result_text(await response.serialize())
 
-        assert isinstance(result, str)
         assert "[Snapshot](" in result
         assert "```yaml" not in result
         assert (tmp_path / "page.yml").read_text(
@@ -283,7 +294,7 @@ def test_action_snapshot_uses_file_for_full_mode(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
-def test_action_snapshot_uses_inline_yaml_for_stdout_mode(tmp_path: Path) -> None:
+def test_action_snapshot_links_snapshot_file_in_stdout_mode(tmp_path: Path) -> None:
     async def run() -> None:
         tab = FakeTab(aria_snapshot='- button "Submit" [ref=e1]')
         context = FakeContext(tab, tmp_path, snapshot_mode="full", output_mode="stdout")
@@ -292,17 +303,16 @@ def test_action_snapshot_uses_inline_yaml_for_stdout_mode(tmp_path: Path) -> Non
         )
         response.set_include_snapshot()
 
-        result = await response.serialize()
+        result = _result_text(await response.serialize())
 
-        assert isinstance(result, str)
-        assert "```yaml" in result
-        assert '- button "Submit" [ref=e1]' in result
-        assert not (tmp_path / "page.yml").exists()
+        assert "### Snapshot" in result
+        assert "[Snapshot](" in result
+        assert (tmp_path / "page.yml").read_text(encoding="utf-8") == '- button "Submit" [ref=e1]'
 
     asyncio.run(run())
 
 
-def test_stdout_mode_returns_text_file_results_inline(tmp_path: Path) -> None:
+def test_file_results_render_as_links(tmp_path: Path) -> None:
     async def run() -> None:
         from playwright_python_mcp.backend.context import FilenameTemplate
 
@@ -315,12 +325,10 @@ def test_stdout_mode_returns_text_file_results_inline(tmp_path: Path) -> None:
         )
         await response.add_file_result(resolved, "hello")
 
-        result = await response.serialize()
+        result = _result_text(await response.serialize())
 
-        assert isinstance(result, str)
-        assert "hello" in result
-        assert "[Console]" not in result
-        assert not resolved.file_name.exists()
+        assert "[Console](" in result
+        assert resolved.file_name.read_text(encoding="utf-8") == "hello"
 
     asyncio.run(run())
 
@@ -334,9 +342,8 @@ def test_action_snapshot_respects_none_mode(tmp_path: Path) -> None:
         )
         response.set_include_snapshot()
 
-        result = await response.serialize()
+        result = _result_text(await response.serialize())
 
-        assert isinstance(result, str)
         assert "### Snapshot" not in result
         assert tab.capture_kwargs and tab.capture_kwargs["include_aria"] is False
 
@@ -354,13 +361,12 @@ def test_raw_response_only_emits_result_snapshot_sections(tmp_path: Path) -> Non
         response.add_code("await page.click()")
         response.set_include_snapshot()
 
-        result = await response.serialize()
+        result = _result_text(await response.serialize())
 
-        assert isinstance(result, str)
         assert result.startswith("ok")
         assert "### Result" not in result
         assert "Ran Playwright code" not in result
-        assert '- button "Submit" [ref=e1]' in result
+        assert "[Snapshot](" in result
 
     asyncio.run(run())
 
@@ -378,11 +384,10 @@ def test_json_response_serializes_sections(tmp_path: Path) -> None:
         response.add_text_result("ok")
         response.set_include_snapshot()
 
-        result = await response.serialize()
+        result = _result_text(await response.serialize())
 
-        assert isinstance(result, str)
         assert '"result": "ok"' in result
-        assert '"snapshot": "- button \\"Submit\\" [ref=e1]"' in result
+        assert '"file": "./page.yml"' in result
         assert "### Result" not in result
 
     asyncio.run(run())
@@ -399,9 +404,8 @@ def test_response_includes_paused_debugger_section(tmp_path: Path) -> None:
             cast(Context, context), tool_name="browser_snapshot", tool_args={}
         )
 
-        result = await response.serialize()
+        result = _result_text(await response.serialize())
 
-        assert isinstance(result, str)
         assert "### Paused" in result
         assert "- Paused on breakpoint at ./example.py:12" in result
         assert "resume by calling resume/step-over/pause-at" in result
