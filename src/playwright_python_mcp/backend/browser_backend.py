@@ -370,10 +370,14 @@ class BrowserBackend:
             raise ValueError("Browser userDataDir is not supported in isolated mode.")
         if not self._config.browser_isolated:
             user_data_dir = self._config.browser_user_data_dir or await self._default_user_data_dir(cwd)
+            _clear_stale_profile_locks(user_data_dir)
             if await _is_profile_locked_5_times(user_data_dir):
+                owner = _profile_lock_owner_description(user_data_dir)
                 raise ValueError(
-                    f"Browser is already in use for {user_data_dir}, "
-                    "use --isolated to run multiple instances of the same browser"
+                    f"Browser is already in use for {user_data_dir}{owner}. "
+                    "Stop the other run (or wait for it to finish) before "
+                    "starting another browser on the same profile, or use "
+                    "--isolated to run multiple instances of the same browser"
                 )
             launch_options["ignore_default_args"] = _persistent_ignore_default_args(
                 launch_options.get("ignore_default_args")
@@ -385,6 +389,15 @@ class BrowserBackend:
                     **self._config.browser_context_options,
                 )
             except Exception as exc:
+                if await _is_profile_locked_5_times(user_data_dir):
+                    owner = _profile_lock_owner_description(user_data_dir)
+                    raise RuntimeError(
+                        f"Browser profile {user_data_dir} is in use by another "
+                        f"running browser{owner}. Stop the other run (or wait for "
+                        "it to finish) before starting another browser on the same "
+                        "profile, or use --isolated to run multiple instances of "
+                        "the same browser"
+                    ) from exc
                 raise _map_browser_launch_error(exc, self._config, user_data_dir, launch_options) from exc
             browser = self._playwright_context.browser
             if browser is None:
@@ -422,10 +435,14 @@ class BrowserBackend:
             raise ValueError("Browser userDataDir is not supported in isolated mode.")
         if not self._config.browser_isolated:
             user_data_dir = self._config.browser_user_data_dir or await self._default_user_data_dir(cwd)
+            _clear_stale_profile_locks(user_data_dir)
             if await _is_profile_locked_5_times(user_data_dir):
+                owner = _profile_lock_owner_description(user_data_dir)
                 raise ValueError(
-                    f"Browser is already in use for {user_data_dir}, "
-                    "use --isolated to run multiple instances of the same browser"
+                    f"Browser is already in use for {user_data_dir}{owner}. "
+                    "Stop the other run (or wait for it to finish) before "
+                    "starting another browser on the same profile, or use "
+                    "--isolated to run multiple instances of the same browser"
                 )
             try:
                 combined_opts = {
@@ -440,6 +457,15 @@ class BrowserBackend:
                     **combined_opts,
                 )
             except Exception as exc:
+                if await _is_profile_locked_5_times(user_data_dir):
+                    owner = _profile_lock_owner_description(user_data_dir)
+                    raise RuntimeError(
+                        f"Browser profile {user_data_dir} is in use by another "
+                        f"running browser{owner}. Stop the other run (or wait for "
+                        "it to finish) before starting another browser on the same "
+                        "profile, or use --isolated to run multiple instances of "
+                        "the same browser"
+                    ) from exc
                 raise _map_browser_launch_error(exc, self._config, user_data_dir, launch_options) from exc
             browser = self._playwright_context.browser
             if browser is None:
@@ -672,6 +698,15 @@ async def _is_profile_locked_5_times(user_data_dir: Path) -> bool:
 
 
 def _is_profile_locked(user_data_dir: Path) -> bool:
+    """Whether another live process holds the browser profile.
+
+    Two lock mechanisms exist: the classic ``SingletonLock`` symlink (owns a
+    pid in its target) and the modern Firefox parent lock ``.parentlock`` (a
+    plain empty file whose owning process cannot be read from the file). For
+    ``.parentlock`` the profile is treated as locked only while a live process
+    references this exact profile path; a stale lock left behind by a killed
+    run is never treated as live.
+    """
     lock_file = "lockfile" if os.name == "nt" else "SingletonLock"
     lock_path = user_data_dir / lock_file
     if os.name == "nt":
@@ -687,9 +722,98 @@ def _is_profile_locked(user_data_dir: Path) -> bool:
         target = os.readlink(lock_path)
         pid = int(target.rsplit("-", 1)[-1])
     except (OSError, ValueError):
-        return False
+        pass
+    else:
+        if _pid_alive(pid):
+            return True
+
+    if (user_data_dir / ".parentlock").exists():
+        return _any_process_references_profile(user_data_dir)
+    return False
+
+
+def _clear_stale_profile_locks(user_data_dir: Path) -> None:
+    """Remove profile lock artifacts whose owning process is gone.
+
+    Firefox creates ``.parentlock`` at launch and removes it on clean exit; a
+    killed or crashed run leaves it behind, and a later launch would refuse to
+    use the profile. Only files with no live owner are removed, so an
+    actively-used profile is never touched.
+    """
+    if os.name == "nt":
+        return
+    if _is_profile_locked(user_data_dir):
+        return
+    for name in ("SingletonLock", ".parentlock"):
+        path = user_data_dir / name
+        try:
+            path.unlink()
+        except OSError:
+            continue
+
+
+def _pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
         return True
     except OSError:
         return False
+
+
+def _any_process_references_profile(user_data_dir: Path) -> bool:
+    """Whether a live process has this profile path in its command line.
+
+    The launching browser always receives ``-profile <path>``, so a live owner
+    is visible in /proc even though ``.parentlock`` carries no pid. The
+    scanning process itself is excluded.
+    """
+    if os.name == "nt":
+        return False
+    profile = str(user_data_dir.resolve())
+    self_pid = os.getpid()
+    for entry in os.scandir("/proc"):
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        if pid == self_pid:
+            continue
+        try:
+            cmdline = Path(entry.path, "cmdline").read_bytes().replace(b"\0", b" ").decode(
+                "utf-8", errors="replace"
+            )
+        except OSError:
+            continue
+        if profile in cmdline:
+            return True
+    return False
+
+
+def _profile_lock_owner_description(user_data_dir: Path) -> str:
+    """Human-readable description of the live process holding the profile."""
+    lock_file = "lockfile" if os.name == "nt" else "SingletonLock"
+    lock_path = user_data_dir / lock_file
+    try:
+        target = os.readlink(lock_path)
+        pid = int(target.rsplit("-", 1)[-1])
+    except (OSError, ValueError):
+        pid = None
+    if pid is None:
+        for entry in os.scandir("/proc"):
+            if not entry.name.isdigit():
+                continue
+            try:
+                cmdline = Path(entry.path, "cmdline").read_bytes().replace(b"\0", b" ").decode(
+                    "utf-8", errors="replace"
+                )
+            except OSError:
+                continue
+            if str(user_data_dir.resolve()) in cmdline:
+                return f" (held by pid {entry.name}: {cmdline[:120].strip()})"
+        return ""
+    try:
+        command = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(
+            "utf-8", errors="replace"
+        )
+    except OSError:
+        return f" (held by pid {pid})"
+    return f" (held by pid {pid}: {command[:120].strip()})"
