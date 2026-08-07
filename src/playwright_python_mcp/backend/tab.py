@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 import inspect
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,6 +30,9 @@ from .utils import sanitize_for_file_path
 
 if TYPE_CHECKING:
     from .context import Context
+
+
+logger = logging.getLogger(__name__)
 
 
 Button = Literal["left", "middle", "right"]
@@ -331,7 +335,7 @@ class Tab:
                 for task in pending:
                     task.cancel()
                 for task in done:
-                    task.exception()
+                    _consume_task_exception(task)
                 await self.wait_for_timeout(0.5)
             return result
 
@@ -886,6 +890,24 @@ async def _wait_for_request_response(request: Request) -> None:
             await response.finished()
     except Error:
         return
+
+
+def _consume_task_exception(task: asyncio.Task[Any]) -> None:
+    """Consume a settle-watcher task exception without re-raising it.
+
+    The action itself has already completed at this point, so a watcher
+    failure must never turn a successful browser action into a reported
+    failure. Mirrors the upstream server, which swallows every watcher
+    rejection with .catch(() => {}).
+    """
+    if task.cancelled():
+        return
+    try:
+        exception = task.exception()
+    except asyncio.CancelledError:
+        return
+    if exception is not None:
+        logger.warning("Settle watcher failed after a completed action: %s", exception)
 
 
 def _might_be_download_error(error: Error) -> bool:
