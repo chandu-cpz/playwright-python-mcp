@@ -485,56 +485,9 @@ class Tab:
         depth: int | None = None,
         boxes: bool | None = None,
     ) -> str:
-        aria = (
+        return (
             await self.capture_tab_snapshot(target=target, depth=depth, boxes=boxes)
         ).aria_snapshot
-        # Extension UI (e.g. the Simplify autofill/consent modal) lives inside
-        # shadow roots that Playwright's full-page ARIA snapshot does not
-        # traverse, so the agent never sees it. Targeted snapshots of each
-        # shadow host pierce open shadow roots and emit the same aria-ref
-        # tokens the existing resolver handles — no new targeting system.
-        shadow = await self._shadow_host_extension_snapshot()
-        if shadow:
-            aria = f"{aria}\n\n{shadow}" if aria else shadow
-        return aria
-
-    async def _shadow_host_extension_snapshot(self) -> str:
-        """Append targeted ARIA snapshots of shadow hosts that hold interactive
-        extension content (buttons/links/inputs inside open shadow roots)."""
-        try:
-            hosts = await self.page.evaluate(
-                """() => {
-                  const out = [];
-                  for (const el of document.querySelectorAll('*')) {
-                    const root = el.shadowRoot;
-                    if (!root) continue;
-                    const hasInteractive = root.querySelector(
-                      'button, a[href], input, select, textarea, [role="button"], [role="link"], [role="checkbox"], [role="combobox"]'
-                    );
-                    if (!hasInteractive) continue;
-                    if (el.getAttribute('data-z-shadow-host')) continue;
-                    out.push(el);
-                  }
-                  out.forEach((el, i) => el.setAttribute('data-z-shadow-host', String(i + 1)));
-                  return out.length;
-                }"""
-            )
-        except Exception:
-            return ""
-        if not hosts:
-            return ""
-        sections: list[str] = []
-        for index in range(1, hosts + 1):
-            locator = self.page.locator(f'[data-z-shadow-host="{index}"]')
-            try:
-                snapshot = await locator.aria_snapshot(mode="ai")
-            except Exception:
-                continue
-            if snapshot and snapshot.strip():
-                sections.append(
-                    f"SHADOW-DOM EXTENSION CONTENT (refs below are clickable):\n{snapshot.strip()}"
-                )
-        return "\n\n".join(sections)
 
     async def capture_tab_snapshot(
         self,
