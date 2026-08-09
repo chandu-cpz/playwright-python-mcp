@@ -19,11 +19,7 @@ async def _handle_find(context: Context, params: dict[str, Any], response: Respo
         return
 
     tab = await context.ensure_tab()
-    # Search the same augmented snapshot the agent sees (capture_snapshot
-    # appends SHADOW-DOM EXTENSION CONTENT sections, so extension UI inside
-    # shadow roots — e.g. the Simplify consent/autofill controls — is findable
-    # instead of invisible to a raw full-page aria_snapshot).
-    snapshot = await tab.capture_snapshot()
+    snapshot = await tab.page.aria_snapshot(mode="ai")
     lines = snapshot.splitlines()
     if regex is not None:
         try:
