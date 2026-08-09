@@ -8,6 +8,7 @@ from typing import Any, cast
 from collections.abc import Callable
 
 import pytest
+from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from playwright_python_mcp.backend.browser_backend import BrowserBackend
@@ -160,6 +161,72 @@ def test_navigation_accepts_requested_url_when_commit_event_is_missing() -> None
 
     async def run() -> None:
         await Tab.navigate(cast(Any, NavigationTab()), "https://example.com/jobs?id=42")
+
+    asyncio.run(run())
+
+
+def test_navigation_accepts_abort_when_document_already_committed() -> None:
+    class NavigationPage:
+        url = "https://example.com/applications/new"
+
+        def on(self, _event: str, _listener: Any) -> None:
+            pass
+
+        def remove_listener(self, _event: str, _listener: Any) -> None:
+            pass
+
+        async def goto(self, _url: str, **_options: Any) -> None:
+            raise PlaywrightError("Page.goto: NS_ERROR_ABORT")
+
+        async def wait_for_load_state(self, _state: str, *, timeout: int) -> None:
+            assert timeout == 5000
+
+    class NavigationTab:
+        def __init__(self) -> None:
+            loop = asyncio.get_running_loop()
+            self._initialized = loop.create_future()
+            self._initialized.set_result(None)
+            self.page = NavigationPage()
+            self.navigation_timeout = 60_000
+
+        def _clear_collected_artifacts(self) -> None:
+            pass
+
+    async def run() -> None:
+        # The document already committed to the requested URL before the
+        # protocol reported the abort; navigation must not hard-fail.
+        await Tab.navigate(cast(Any, NavigationTab()), "https://example.com/applications/new")
+
+    asyncio.run(run())
+
+
+def test_navigation_reraises_abort_when_target_was_not_committed() -> None:
+    class NavigationPage:
+        url = "about:blank"
+
+        def on(self, _event: str, _listener: Any) -> None:
+            pass
+
+        def remove_listener(self, _event: str, _listener: Any) -> None:
+            pass
+
+        async def goto(self, _url: str, **_options: Any) -> None:
+            raise PlaywrightError("Page.goto: NS_ERROR_ABORT")
+
+    class NavigationTab:
+        def __init__(self) -> None:
+            loop = asyncio.get_running_loop()
+            self._initialized = loop.create_future()
+            self._initialized.set_result(None)
+            self.page = NavigationPage()
+            self.navigation_timeout = 60_000
+
+        def _clear_collected_artifacts(self) -> None:
+            pass
+
+    async def run() -> None:
+        with pytest.raises(PlaywrightError):
+            await Tab.navigate(cast(Any, NavigationTab()), "https://example.com/applications/new")
 
     asyncio.run(run())
 

@@ -290,9 +290,15 @@ class Context:
         return self.cwd / base_name
 
     def redact_secrets(self, text: str) -> str:
-        for secret_name, secret_value in (self.config.secrets or {}).items():
-            if secret_value:
-                text = text.replace(secret_value, f"<secret>{secret_name}</secret>")
+        text = self._mask_text(text, (self.config.secrets or {}))
+        text = self._mask_text(text, (self.config.redact_values or {}))
+        return text
+
+    @staticmethod
+    def _mask_text(text: str, source: dict[str, str]) -> str:
+        for name, value in source.items():
+            if value:
+                text = text.replace(value, f"<secret>{name}</secret>")
         return text
 
     def drain_unhandled_errors(self) -> list[str]:
@@ -311,6 +317,9 @@ class Context:
         return task
 
     def lookup_secret(self, secret_name: str) -> LookupSecret:
+        # Intentionally reads ONLY config.secrets (credentials). config.redact_values
+        # masks LLM-visible text but is deliberately NOT resolvable here, so PII
+        # seeded via redact_values can never be fetched back by name.
         secret_value = (self.config.secrets or {}).get(secret_name)
         if secret_value is None:
             return LookupSecret(value=secret_name, code=python_literal(secret_name))

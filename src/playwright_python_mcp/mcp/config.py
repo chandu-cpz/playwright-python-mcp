@@ -46,6 +46,7 @@ class ServerConfig:
     save_session: bool = False
     shared_browser_context: bool = False
     secrets: dict[str, str] | None = None
+    redact_values: dict[str, str] | None = None
     snapshot_mode: str = "full"
     action_timeout: int | None = 5000
     navigation_timeout: int | None = 60000
@@ -386,6 +387,7 @@ def _server_config_from_merged(config: dict[str, Any]) -> ServerConfig:
         save_session=bool(config.get("saveSession", False)),
         shared_browser_context=bool(config.get("sharedBrowserContext", False)),
         secrets=config.get("secrets"),
+        redact_values=config.get("redact_values"),
         snapshot_mode=str(snapshot.get("mode") or "full"),
         action_timeout=timeouts.get("action"),
         navigation_timeout=timeouts.get("navigation"),

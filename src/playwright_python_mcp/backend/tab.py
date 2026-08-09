@@ -45,7 +45,6 @@ _REF_PATTERN = re.compile(r"^(?:f\d+)?e\d+$")
 _COMMIT_ACK_TIMEOUT_MS = 120_000
 
 
-
 @dataclass(slots=True)
 class ResolvedTarget:
     locator: Locator
@@ -170,7 +169,9 @@ class Tab:
     async def navigate(self, url: str) -> None:
         await self._initialized
         self._clear_collected_artifacts()
-        download_event: asyncio.Future[Download] = asyncio.get_running_loop().create_future()
+        download_event: asyncio.Future[Download] = (
+            asyncio.get_running_loop().create_future()
+        )
 
         def download_listener(download: Download) -> None:
             if not download_event.done():
@@ -192,20 +193,29 @@ class Tab:
                     await self.page.evaluate("window.stop()")
                 raise
         except Error as exc:
-            if not _might_be_download_error(exc):
+            if _might_be_download_error(exc):
+                try:
+                    await asyncio.wait_for(download_event, timeout=3)
+                except TimeoutError:
+                    raise exc from None
+                await asyncio.sleep(0.5)
+                return
+            if not (
+                _is_aborted_navigation_error(exc)
+                and _same_navigation_target(self.page.url, url)
+            ):
                 raise
-            try:
-                await asyncio.wait_for(download_event, timeout=3)
-            except TimeoutError:
-                raise exc from None
-            await asyncio.sleep(0.5)
-            return
+            # The document committed to the requested URL but the protocol
+            # reported an abort (Firefox/Camoufox NS_ERROR_ABORT, often a race
+            # with redirecting sites). The navigation did land; fall through to
+            # the DOM settle wait below.
         finally:
             self.page.remove_listener("download", download_listener)
         try:
             await self.page.wait_for_load_state("domcontentloaded", timeout=5000)
         except Error:
             pass
+
     async def check_url_and_navigate(self, url: str) -> str:
         try:
             parsed = urlparse(url)
@@ -245,20 +255,28 @@ class Tab:
     ) -> None:
         async def action() -> None:
             if double_click:
-                await resolved.locator.dblclick(button=button, modifiers=modifiers, timeout=self.action_timeout)
+                await resolved.locator.dblclick(
+                    button=button, modifiers=modifiers, timeout=self.action_timeout
+                )
             else:
-                await resolved.locator.click(button=button, modifiers=modifiers, timeout=self.action_timeout)
+                await resolved.locator.click(
+                    button=button, modifiers=modifiers, timeout=self.action_timeout
+                )
 
         await self.wait_for_completion(action)
 
-    async def select_option(self, resolved: ResolvedTarget, *, values: list[str]) -> None:
+    async def select_option(
+        self, resolved: ResolvedTarget, *, values: list[str]
+    ) -> None:
         await resolved.locator.select_option(values, timeout=self.action_timeout)
 
     async def hover(self, resolved: ResolvedTarget) -> None:
         await resolved.locator.hover(timeout=self.action_timeout)
 
     async def drag_to(self, start: ResolvedTarget, end: ResolvedTarget) -> None:
-        await self.wait_for_completion(lambda: start.locator.drag_to(end.locator, timeout=self.action_timeout))
+        await self.wait_for_completion(
+            lambda: start.locator.drag_to(end.locator, timeout=self.action_timeout)
+        )
 
     async def mouse_move_xy(self, *, x: int | float, y: int | float) -> None:
         await self.page.mouse.move(x, y)
@@ -273,7 +291,9 @@ class Tab:
         delay: int | float | None = None,
     ) -> None:
         await self.wait_for_completion(
-            lambda: self.page.mouse.click(x, y, button=button, click_count=click_count, delay=delay)
+            lambda: self.page.mouse.click(
+                x, y, button=button, click_count=click_count, delay=delay
+            )
         )
 
     async def mouse_down(self, *, button: Button | None = None) -> None:
@@ -321,7 +341,9 @@ class Tab:
 
             if any(request.is_navigation_request() for request in requests):
                 try:
-                    await self.page.main_frame.wait_for_load_state("load", timeout=10000)
+                    await self.page.main_frame.wait_for_load_state(
+                        "load", timeout=10000
+                    )
                 except Error:
                     pass
                 return result
@@ -340,13 +362,19 @@ class Tab:
             return result
 
         action_task = self.context.track_task(asyncio.create_task(action_and_settle()))
-        modal_task = self.context.track_task(asyncio.create_task(self._modal_event.wait()))
-        done, pending = await asyncio.wait({action_task, modal_task}, return_when=asyncio.FIRST_COMPLETED)
+        modal_task = self.context.track_task(
+            asyncio.create_task(self._modal_event.wait())
+        )
+        done, pending = await asyncio.wait(
+            {action_task, modal_task}, return_when=asyncio.FIRST_COMPLETED
+        )
         if action_task in done:
             modal_task.cancel()
             return await action_task
         else:
-            action_task.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
+            action_task.add_done_callback(
+                lambda task: task.exception() if not task.cancelled() else None
+            )
             return None
 
     async def press_key(self, key: str) -> None:
@@ -376,7 +404,9 @@ class Tab:
     ) -> None:
         async def action() -> None:
             if slowly:
-                await resolved.locator.press_sequentially(text, timeout=self.action_timeout)
+                await resolved.locator.press_sequentially(
+                    text, timeout=self.action_timeout
+                )
             else:
                 await resolved.locator.fill(text, timeout=self.action_timeout)
             if submit:
@@ -387,13 +417,19 @@ class Tab:
         else:
             await action()
 
-    async def fill_form_field(self, resolved: ResolvedTarget, *, field_type: str, value: str) -> None:
+    async def fill_form_field(
+        self, resolved: ResolvedTarget, *, field_type: str, value: str
+    ) -> None:
         if field_type in {"textbox", "slider"}:
             await resolved.locator.fill(value, timeout=self.action_timeout)
         elif field_type in {"checkbox", "radio"}:
-            await resolved.locator.set_checked(value == "true", timeout=self.action_timeout)
+            await resolved.locator.set_checked(
+                value == "true", timeout=self.action_timeout
+            )
         elif field_type == "combobox":
-            await resolved.locator.select_option(label=value, timeout=self.action_timeout)
+            await resolved.locator.select_option(
+                label=value, timeout=self.action_timeout
+            )
         else:
             raise ValueError(f"Unsupported form field type: {field_type}")
 
@@ -403,7 +439,9 @@ class Tab:
     async def uncheck(self, resolved: ResolvedTarget) -> None:
         await resolved.locator.uncheck(timeout=self.action_timeout)
 
-    async def evaluate(self, expression: str, resolved: ResolvedTarget | None = None) -> tuple[Any, bool, bool]:
+    async def evaluate(
+        self, expression: str, resolved: ResolvedTarget | None = None
+    ) -> tuple[Any, bool, bool]:
         if resolved is not None:
             result = await resolved.locator.evaluate(
                 """async (element, expr) => {
@@ -434,7 +472,9 @@ class Tab:
         depth: int | None = None,
         boxes: bool | None = None,
     ) -> str:
-        return (await self.capture_tab_snapshot(target=target, depth=depth, boxes=boxes)).aria_snapshot
+        return (
+            await self.capture_tab_snapshot(target=target, depth=depth, boxes=boxes)
+        ).aria_snapshot
 
     async def capture_tab_snapshot(
         self,
@@ -456,7 +496,9 @@ class Tab:
             )
         aria_snapshot = ""
         if include_aria:
-            aria_snapshot = await self._aria_snapshot_race(target=target, root=root, depth=depth, boxes=boxes)
+            aria_snapshot = await self._aria_snapshot_race(
+                target=target, root=root, depth=depth, boxes=boxes
+            )
             if self._modal_states:
                 return TabSnapshot(
                     aria_snapshot="",
@@ -503,9 +545,13 @@ class Tab:
             lines.append(f"- Page Title: {title}")
         return lines
 
-    async def resolve_target(self, *, target: str, element: str | None = None) -> ResolvedTarget:
+    async def resolve_target(
+        self, *, target: str, element: str | None = None
+    ) -> ResolvedTarget:
         if not _REF_PATTERN.match(target):
-            selector = locator_or_selector_as_selector(target, test_id_attribute=self.context.config.test_id_attribute)
+            selector = locator_or_selector_as_selector(
+                target, test_id_attribute=self.context.config.test_id_attribute
+            )
             handle = await self.page.query_selector(selector)
             if handle is None:
                 raise ValueError(f'"{target}" does not match any elements.')
@@ -533,7 +579,9 @@ class Tab:
 
     async def snapshot_locator(self, target: str | None) -> Locator:
         if target is None:
-            raise ValueError("Full-page snapshots use page.aria_snapshot(); no locator is available.")
+            raise ValueError(
+                "Full-page snapshots use page.aria_snapshot(); no locator is available."
+            )
         return (await self.resolve_target(target=target)).locator
 
     async def console_message_count(self) -> dict[str, int]:
@@ -544,7 +592,9 @@ class Tab:
             "warnings": sum(message.type == "warning" for message in messages),
         }
 
-    async def console_messages(self, *, level: str = "info", all_messages: bool = False) -> list[str]:
+    async def console_messages(
+        self, *, level: str = "info", all_messages: bool = False
+    ) -> list[str]:
         return [
             message.render()
             for message in await self._console_entries(all_messages=all_messages)
@@ -561,7 +611,9 @@ class Tab:
         return self._modal_states
 
     def clear_modal_state(self, modal_state: dict[str, Any]) -> None:
-        self._modal_states = [state for state in self._modal_states if state is not modal_state]
+        self._modal_states = [
+            state for state in self._modal_states if state is not modal_state
+        ]
 
     async def prune_stale_dialogs(self) -> None:
         """Drop recorded dialog modal states whose native dialog is already closed.
@@ -595,10 +647,14 @@ class Tab:
         with suppress(Error):
             await self.page.clear_page_errors()
         self._console_log.stop()
-        self._console_log = LogFile(self.context, file_prefix="console", title="Console")
+        self._console_log = LogFile(
+            self.context, file_prefix="console", title="Console"
+        )
 
     async def _console_entries(self, *, all_messages: bool) -> list[ConsoleEntry]:
-        filter_value: Literal["all", "since-navigation"] = "all" if all_messages else "since-navigation"
+        filter_value: Literal["all", "since-navigation"] = (
+            "all" if all_messages else "since-navigation"
+        )
         try:
             messages = await self.page.console_messages(filter=filter_value)
             errors = await self.page.page_errors(filter=filter_value)
@@ -620,7 +676,9 @@ class Tab:
         self._recent_event_entries.clear()
         self._main_document_status = None
         self._console_log.stop()
-        self._console_log = LogFile(self.context, file_prefix="console", title="Console")
+        self._console_log = LogFile(
+            self.context, file_prefix="console", title="Console"
+        )
 
     def _on_console_message(self, message: ConsoleMessage) -> None:
         entry = self._console_entry_from_message(message)
@@ -652,7 +710,11 @@ class Tab:
         )
 
     def _console_entry_from_page_error(self, error: Error) -> ConsoleEntry:
-        text = getattr(error, "stack", None) or getattr(error, "message", None) or str(error)
+        text = (
+            getattr(error, "stack", None)
+            or getattr(error, "message", None)
+            or str(error)
+        )
         return ConsoleEntry(
             type="error",
             text=str(text),
@@ -692,7 +754,10 @@ class Tab:
                 "type": "dialog",
                 "description": f'"{dialog.type}" dialog with message "{dialog.message}"',
                 "dialog": dialog,
-                "clearedBy": {"tool": "browser_handle_dialog", "skill": "dialog-accept or dialog-dismiss"},
+                "clearedBy": {
+                    "tool": "browser_handle_dialog",
+                    "skill": "dialog-accept or dialog-dismiss",
+                },
             }
         )
         self._modal_event.set()
@@ -713,12 +778,38 @@ class Tab:
 
         self.context.track_task(asyncio.create_task(self._download_started(download)))
 
+    async def liveness(self, timeout_seconds: float = 2.0) -> bool:
+        """Return True when the renderer answers CDP within the timeout.
+
+        A page whose main thread is blocked (stuck synchronous request,
+        frozen renderer) fails this probe within the timeout instead of
+        hanging snapshot/title/query callers indefinitely.
+        """
+        if self._modal_states:
+            return False
+        try:
+            async with asyncio.timeout(timeout_seconds):
+                await self.page.evaluate("1")
+            return True
+        except (TimeoutError, Error):
+            return False
+
     async def _title_or_empty(self) -> str:
         if self._modal_states:
             return ""
-        title_task = self.context.track_task(asyncio.create_task(self.page.title()))
-        modal_task = self.context.track_task(asyncio.create_task(self._modal_event.wait()))
-        done, pending = await asyncio.wait({title_task, modal_task}, return_when=asyncio.FIRST_COMPLETED)
+
+        async def _title_with_bound() -> str:
+            async with asyncio.timeout(5):
+                return await self.page.title()
+            raise Error("title timeout")
+
+        title_task = self.context.track_task(asyncio.create_task(_title_with_bound()))
+        modal_task = self.context.track_task(
+            asyncio.create_task(self._modal_event.wait())
+        )
+        done, pending = await asyncio.wait(
+            {title_task, modal_task}, return_when=asyncio.FIRST_COMPLETED
+        )
         for task in pending:
             task.cancel()
         if modal_task in done:
@@ -740,7 +831,9 @@ class Tab:
             ),
             origin="code",
         )
-        self._add_log_entry({"type": "download-start", "suggested_filename": suggested_filename})
+        self._add_log_entry(
+            {"type": "download-start", "suggested_filename": suggested_filename}
+        )
         await download.save_as(output_file)
         self._add_log_entry(
             {
@@ -757,9 +850,15 @@ class Tab:
         import asyncio
         import time
 
-        if not _should_include_console_message(self.context.config.console_level, entry.type):
+        if not _should_include_console_message(
+            self.context.config.console_level, entry.type
+        ):
             return
-        self.context.track_task(asyncio.create_task(self._console_log.append_line(time.time() * 1000, entry.render())))
+        self.context.track_task(
+            asyncio.create_task(
+                self._console_log.append_line(time.time() * 1000, entry.render())
+            )
+        )
 
     def _add_listener(self, target: Any, event: str, handler: Any) -> None:
         target.on(event, handler)
@@ -796,19 +895,34 @@ class Tab:
             return ""
 
         async def capture() -> str:
-            if root is not None:
-                snapshot = root.aria_snapshot
-                return await snapshot(**_aria_snapshot_options(snapshot, depth=depth, boxes=boxes))
-            if target is None:
-                snapshot = self.page.aria_snapshot
-                return await snapshot(**_aria_snapshot_options(snapshot, depth=depth, boxes=boxes))
-            locator = await self.snapshot_locator(target)
-            snapshot = locator.aria_snapshot
-            return await snapshot(**_aria_snapshot_options(snapshot, depth=depth, boxes=boxes))
+            try:
+                async with asyncio.timeout(_ARIA_SNAPSHOT_TIMEOUT_SECONDS):
+                    if root is not None:
+                        snapshot = root.aria_snapshot
+                        return await snapshot(
+                            **_aria_snapshot_options(snapshot, depth=depth, boxes=boxes)
+                        )
+                    if target is None:
+                        snapshot = self.page.aria_snapshot
+                        return await snapshot(
+                            **_aria_snapshot_options(snapshot, depth=depth, boxes=boxes)
+                        )
+                    locator = await self.snapshot_locator(target)
+                    snapshot = locator.aria_snapshot
+                    return await snapshot(
+                        **_aria_snapshot_options(snapshot, depth=depth, boxes=boxes)
+                    )
+            except TimeoutError:
+                return ""
+            raise
 
         capture_task = self.context.track_task(asyncio.create_task(capture()))
-        modal_task = self.context.track_task(asyncio.create_task(self._modal_event.wait()))
-        done, pending = await asyncio.wait({capture_task, modal_task}, return_when=asyncio.FIRST_COMPLETED)
+        modal_task = self.context.track_task(
+            asyncio.create_task(self._modal_event.wait())
+        )
+        done, pending = await asyncio.wait(
+            {capture_task, modal_task}, return_when=asyncio.FIRST_COMPLETED
+        )
         for task in pending:
             task.cancel()
         if modal_task in done:
@@ -870,25 +984,55 @@ def _console_level_for_message_type(message_type: str) -> str:
         return "error"
     if message_type == "warning":
         return "warning"
-    if message_type in ("count", "dir", "dirxml", "info", "log", "table", "time", "timeEnd"):
+    if message_type in (
+        "count",
+        "dir",
+        "dirxml",
+        "info",
+        "log",
+        "table",
+        "time",
+        "timeEnd",
+    ):
         return "info"
-    if message_type in ("clear", "debug", "endGroup", "profile", "profileEnd", "startGroup", "startGroupCollapsed", "trace"):
+    if message_type in (
+        "clear",
+        "debug",
+        "endGroup",
+        "profile",
+        "profileEnd",
+        "startGroup",
+        "startGroupCollapsed",
+        "trace",
+    ):
         return "debug"
     return "info"
+
+
+_ARIA_SNAPSHOT_TIMEOUT_SECONDS = 30.0
 
 
 def _should_include_console_message(level: str, message_type: str) -> bool:
     message_level = _console_level_for_message_type(message_type)
     threshold = level or "info"
-    return _CONSOLE_MESSAGE_LEVELS.index(message_level) <= _CONSOLE_MESSAGE_LEVELS.index(threshold)
+    return _CONSOLE_MESSAGE_LEVELS.index(
+        message_level
+    ) <= _CONSOLE_MESSAGE_LEVELS.index(threshold)
 
 
 async def _wait_for_request_response(request: Request) -> None:
     try:
         response = await request.response()
-        if response is not None and request.resource_type in {"document", "stylesheet", "script", "xhr", "fetch"}:
-            await response.finished()
-    except Error:
+        if response is not None and request.resource_type in {
+            "document",
+            "stylesheet",
+            "script",
+            "xhr",
+            "fetch",
+        }:
+            async with asyncio.timeout(10):
+                await response.finished()
+    except (Error, TimeoutError):
         return
 
 
@@ -913,6 +1057,11 @@ def _consume_task_exception(task: asyncio.Task[Any]) -> None:
 def _might_be_download_error(error: Error) -> bool:
     message = str(error)
     return "net::ERR_ABORTED" in message or "Download is starting" in message
+
+
+def _is_aborted_navigation_error(error: Error) -> bool:
+    """Detect a Firefox/Camoufox abort that can race a committed navigation."""
+    return "NS_ERROR_ABORT" in str(error)
 
 
 def _is_main_frame_navigation(page: Page, request: Request) -> bool:
