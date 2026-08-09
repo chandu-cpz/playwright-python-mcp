@@ -421,7 +421,7 @@ class Tab:
         self, resolved: ResolvedTarget, *, field_type: str, value: str
     ) -> None:
         if field_type in {"textbox", "slider"}:
-            await resolved.locator.fill(value, timeout=self.action_timeout)
+            await self._fill_text_field(resolved.locator, value)
         elif field_type in {"checkbox", "radio"}:
             await resolved.locator.set_checked(
                 value == "true", timeout=self.action_timeout
@@ -432,6 +432,19 @@ class Tab:
             )
         else:
             raise ValueError(f"Unsupported form field type: {field_type}")
+
+    async def _fill_text_field(self, locator: Any, value: str) -> None:
+        """Replace a text input's value using only the Playwright API.
+
+        ``locator.fill()`` on the camoufox (Firefox) backend appends to the
+        existing value of simplify's controlled input instead of replacing it
+        (measured 1x, 2x, 3x copies on three identical fills), which corrupts
+        fields and makes the page signature churn so loop guards cannot fire.
+        Clearing the field first with ``locator.clear()`` (select-all + delete)
+        and only then filling yields exactly one copy of the value every time.
+        """
+        await locator.clear(timeout=self.action_timeout)
+        await locator.fill(value, timeout=self.action_timeout)
 
     async def check(self, resolved: ResolvedTarget) -> None:
         await resolved.locator.check(timeout=self.action_timeout)
