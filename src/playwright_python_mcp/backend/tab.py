@@ -43,6 +43,11 @@ _REF_PATTERN = re.compile(r"^(?:f\d+)?e\d+$")
 # navigation timeout, but allow the default 60-second navigation budget before
 # turning that startup work into a false navigation failure.
 _COMMIT_ACK_TIMEOUT_MS = 120_000
+# ``locator.normalize()`` and ``query_selector`` have no built-in timeout. A
+# frozen or mid-render renderer hangs them indefinitely — and since batch steps
+# resolve their target before dispatching the action, this hangs the whole
+# batch. Bound resolution so a stuck page becomes an actionable error.
+_RESOLVE_TARGET_TIMEOUT_SECONDS = 10
 
 
 @dataclass(slots=True)
@@ -565,7 +570,14 @@ class Tab:
             selector = locator_or_selector_as_selector(
                 target, test_id_attribute=self.context.config.test_id_attribute
             )
-            handle = await self.page.query_selector(selector)
+            try:
+                async with asyncio.timeout(_RESOLVE_TARGET_TIMEOUT_SECONDS):
+                    handle = await self.page.query_selector(selector)
+            except TimeoutError:
+                raise ValueError(
+                    f'Target "{target}" resolution timed out; the page may be frozen. '
+                    "Capture fresh evidence and retry."
+                )
             if handle is None:
                 raise ValueError(f'"{target}" does not match any elements.')
             await handle.dispose()
@@ -578,13 +590,22 @@ class Tab:
             locator = self.page.locator(f"aria-ref={target}")
             if element:
                 locator = locator.describe(element)
-            normalized = await locator.normalize()
+            try:
+                async with asyncio.timeout(_RESOLVE_TARGET_TIMEOUT_SECONDS):
+                    normalized = await locator.normalize()
+            except TimeoutError:
+                raise ValueError(
+                    f"Ref {target} normalization timed out; the page may be frozen. "
+                    "Capture fresh evidence and retry."
+                )
             return ResolvedTarget(
                 locator=locator,
                 # Uses private _impl_obj because Playwright Python does not expose a
                 # public `selector` property on normalized locators yet.
                 code=as_python_locator(normalized._impl_obj._selector),
             )
+        except ValueError:
+            raise
         except Exception as exc:
             raise ValueError(
                 f"Ref {target} not found in the current page snapshot. Try capturing new snapshot."
